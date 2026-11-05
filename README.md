@@ -98,7 +98,7 @@ Its tapes, mixdowns and snapshots are saved in the same folder as the Keytape ap
 
 ## How it works
 
-- **The audio graph:** each device on the table is a node in one JUCE `AudioProcessorGraph`, and each cable is a connection in it, audio or MIDI. The audio interface's jacks are joined to the graph's links to the computer's audio device and MIDI inputs.
+- **The audio graph:** each device on the table is a node in one JUCE `AudioProcessorGraph`, and each cable is a connection in it, audio or MIDI. The cables from the audio interface's IN and MIDI jacks come straight from the graph's links to the computer's audio input and MIDI inputs, so a device whose sound comes back to the speakers isn't in a loop (a loop would feed it silence). The computer's default input opens when an IN jack is first cabled, and the device chosen in Audio/MIDI is remembered.
 - **The devices:** each repository publishes a `<device>-module.cmake` listing its sources, and a processor wrapper in `src/plugin/`. The wrapper uses the same engine and panel as the device's own app, in a hosted mode that opens no audio device and takes its audio and MIDI from the graph. Tabletop compiles those sources into its own target.
 - **Real size:** the table works in millimetres. Each device's panel is scaled to the device's real width, so they sit at their true sizes relative to each other.
 - **Panel pictures:** zoomed out, the devices show pictures of their panels, refreshed a few times a second at a resolution that suits the zoom. That keeps panning and zooming smooth. The device you zoom in on gets its live panel.
@@ -140,3 +140,15 @@ Other testing aids:
 - `TABLETOP_RENDER_SHELF=assets/shelf` renders the shelf's pictures again from the devices' real panels, then quits. Do this after a device's look changes, and commit the PNG files. They're built into the app.
 
 Each device's own tests live in its repository.
+
+## A GPUI version (experimental)
+
+The [`gpui` branch](https://github.com/csprech/tabletop/tree/gpui) draws the table with [GPUI](https://gpui.rs) instead of JUCE.
+- **On the GPU:** the camera, the wood, the cables and the shelf.
+- **Unchanged:** the studio, its audio graph and the devices stay the same C++, behind a small C interface.
+- **Flying in:** the device you fly in to is live, and gets the mouse and keyboard.
+- **Its own table:** it keeps its own saved table, so this one stays as it is.
+
+On a table with all seven devices, flying in and out runs at about 49 fps with GPUI, against 19 fps here.
+- The JUCE measurement is on the [`experiment/opengl-bench` branch](https://github.com/csprech/tabletop/tree/experiment/opengl-bench): `TABLETOP_BENCH`, plus an OpenGL switch that turned out not to help.
+- `gpui/README.md` on the `gpui` branch explains how to build and run the GPUI version.
