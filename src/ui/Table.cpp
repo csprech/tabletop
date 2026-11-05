@@ -606,6 +606,8 @@ void TableView::timerCallback()
 
 void TableView::paint (juce::Graphics& g)
 {
+    if (recordFrames)
+        frameTimes.push_back (juce::Time::getMillisecondCounterHiRes() * 0.001);
     // the table top
     g.setFillType (juce::FillType (wood, juce::AffineTransform::scale (zoom * woodMm / (float) wood.getWidth()).translated (offset)));
     g.fillAll();

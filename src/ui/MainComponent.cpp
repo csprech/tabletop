@@ -197,6 +197,13 @@ MainComponent::MainComponent()
     updateTitle();
     shelf.refresh (session);
     startTimer (60 * 1000);
+    if (auto* gl = std::getenv ("TABLETOP_OPENGL"); gl != nullptr && juce::String (gl) == "1")
+        openGL.attachTo (*this);
+    if (auto* bench = std::getenv ("TABLETOP_BENCH"))
+        juce::Timer::callAfterDelay (2500, [safe = juce::Component::SafePointer<MainComponent> (this), f = juce::File (bench)] {
+            if (safe != nullptr)
+                safe->runBenchmark (f);
+        });
     if (auto* focus = std::getenv ("TABLETOP_FOCUS")) // testing aid: fly in to the first device of a type ("keytape")
         juce::Timer::callAfterDelay (1500, [safe = juce::Component::SafePointer<MainComponent> (this), type = juce::String (focus)] {
             if (safe != nullptr)
@@ -216,6 +223,7 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    openGL.detach();
     setApplicationCommandManagerToWatch (nullptr);
     for (auto* b : { &backBtn, &fitBtn, &audioBtn, &helpBtn })
         b->setLookAndFeel (nullptr);
@@ -718,5 +726,92 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
             juce::JUCEApplicationBase::quit();
         });
     });
+}
+// ---------------------------------------------------------------- benchmark
+
+void MainComponent::runBenchmark (const juce::File& reportFile)
+{
+    // Each move is timed from the frames the table actually paints: flying in to every device and back, then a
+    // second of zooming with the wheel (a step every 16 ms). It reports frames per second and the longest gap.
+    struct Move
+    {
+        juce::String name;
+        std::function<void()> start;
+        int ms;
+    };
+    auto moves = std::make_shared<std::vector<Move>>();
+    for (auto& d : session.getDevices())
+    {
+        const auto uid = d.uid;
+        moves->push_back ({ "fly in to " + d.type->name, [this, uid] { table.focusOn (uid); }, 1300 });
+        moves->push_back ({ "back to the table", [this] { table.backToTable(); }, 1300 });
+    }
+    moves->push_back ({ "wheel zoom in and out", [this] {
+                           auto steps = std::make_shared<int> (0);
+                           auto tick = std::make_shared<std::function<void()>>();
+                           *tick = [this, steps, tick] {
+                               if (*steps >= 60)
+                                   return;
+                               const float f = *steps < 30 ? 1.04f : 1.0f / 1.04f;
+                               table.zoomAround (table.getLocalBounds().toFloat().getCentre(), f);
+                               ++*steps;
+                               juce::Timer::callAfterDelay (16, [tick] { (*tick)(); });
+                           };
+                           (*tick)();
+                       },
+                       1200 });
+    auto lines = std::make_shared<juce::StringArray>();
+    lines->add (juce::String ("renderer: ") + (openGL.isAttached() ? "OpenGL" : "CoreGraphics") + ", window " + juce::String (getWidth()) + " x "
+                + juce::String (getHeight()) + ", display scale " + juce::String (juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale));
+    auto totals = std::make_shared<std::array<double, 3>>(); // (frames, seconds, worst gap)
+    struct Runner
+    {
+        static void next (juce::Component::SafePointer<MainComponent> safe, std::shared_ptr<std::vector<Move>> moves, size_t i,
+                          std::shared_ptr<juce::StringArray> lines, std::shared_ptr<std::array<double, 3>> totals, juce::File report)
+        {
+            if (safe == nullptr)
+                return;
+            if (i >= moves->size())
+            {
+                const auto& t = *totals;
+                lines->add ("");
+                lines->add ("overall: " + juce::String (t[0] / std::max (0.001, t[1]), 1) + " fps, longest gap " + juce::String (t[2] * 1000.0, 0) + " ms");
+                report.replaceWithText (lines->joinIntoString ("\n") + "\n");
+                juce::JUCEApplicationBase::quit();
+                return;
+            }
+            auto& m = (*moves)[i];
+            safe->table.frameTimes.clear();
+            safe->table.recordFrames = true;
+            m.start();
+            juce::Timer::callAfterDelay (m.ms, [safe, moves, i, lines, totals, report] {
+                if (safe == nullptr)
+                    return;
+                auto& tv = safe->table;
+                tv.recordFrames = false;
+                const auto& ft = tv.frameTimes;
+                // (only the moving part: frames until the last one more than 100 ms after the one before stops counting)
+                double worst = 0.0;
+                size_t last = ft.empty() ? 0 : ft.size() - 1;
+                for (size_t k = 1; k < ft.size(); ++k)
+                    if (ft[k] - ft[k - 1] > 0.1)
+                    {
+                        last = k - 1;
+                        break;
+                    }
+                for (size_t k = 1; k <= last && k < ft.size(); ++k)
+                    worst = std::max (worst, ft[k] - ft[k - 1]);
+                const double secs = last > 0 ? ft[last] - ft[0] : 0.0;
+                const double frames = (double) last;
+                (*totals)[0] += frames;
+                (*totals)[1] += secs;
+                (*totals)[2] = std::max ((*totals)[2], worst);
+                lines->add ((*moves)[i].name.paddedRight (' ', 34) + juce::String (secs > 0 ? frames / secs : 0.0, 1) + " fps, longest gap "
+                            + juce::String (worst * 1000.0, 0) + " ms");
+                next (safe, moves, i + 1, lines, totals, report);
+            });
+        }
+    };
+    Runner::next (this, moves, 0, lines, totals, reportFile);
 }
 } // namespace tabletop

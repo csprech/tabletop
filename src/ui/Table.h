@@ -88,6 +88,10 @@ public:
     /** Brings the devices on screen up to date with the session (after loading, adding, removing). */
     void rebuild();
     DeviceNode* findNode (const juce::String& uid) const;
+    /** The benchmark: when recording, the time of every frame the table paints (seconds). */
+    bool recordFrames = false;
+    std::vector<double> frameTimes;
+    bool isAnimating() const { return anim.active; }
     const std::vector<std::unique_ptr<DeviceNode>>& getNodes() const { return nodes; }
 
     // ---- the camera: screen = table (mm) * zoom + offset

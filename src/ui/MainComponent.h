@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Table.h"
+#include <juce_opengl/juce_opengl.h>
 
 namespace tabletop
 {
@@ -83,6 +84,8 @@ private:
     juce::File autosaveFile() const;
     /** TABLETOP_SELFTEST=/path: checks the table, the cables, saving, every device's state and the sound, then quits. */
     void runSelfTest (const juce::File& report);
+    /** TABLETOP_BENCH=/path: flies in to every device and out, and zooms with the wheel, timing the frames. */
+    void runBenchmark (const juce::File& report);
 
     juce::ApplicationCommandManager commands;
     Session session;
@@ -90,6 +93,7 @@ private:
     Shelf shelf;
     juce::TextButton backBtn { "<  Back to the table" }, fitBtn { "Fit" }, audioBtn { "Audio/MIDI" }, helpBtn { "Help" };
     juce::File currentFile;
+    juce::OpenGLContext openGL; // (draws the window on the GPU: see TABLETOP_OPENGL)
     std::unique_ptr<juce::FileChooser> chooser;
 };
 } // namespace tabletop

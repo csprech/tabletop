@@ -69,6 +69,7 @@ target_link_libraries(Tabletop PRIVATE
   juce::juce_audio_formats
   juce::juce_dsp
   juce::juce_gui_extra
+  juce::juce_opengl
   PUBLIC
   juce::juce_recommended_config_flags
   juce::juce_recommended_lto_flags
