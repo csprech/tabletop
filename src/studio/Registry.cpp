@@ -1,6 +1,8 @@
 #include "Registry.h"
 #include "BuiltIn.h"
 #include "fourpole/src/plugin/FourpoleProcessor.h"
+#include "keytape/src/plugin/KeytapeProcessor.h"
+#include "keytape/src/ui/Panel.h"
 #include "padlab/src/plugin/PadlabProcessor.h"
 #include "trackdesk/src/plugin/TrackdeskProcessor.h"
 #include "valvebox/src/plugin/ValveboxProcessor.h"
@@ -94,6 +96,24 @@ namespace
             d.panelCrop = { 14, 32, 1461, 1532 }; // (the chassis, without the desk round it)
             d.pictureCorner = 0.0096f;
             d.create = [] { return std::make_unique<trackdesk::TrackdeskProcessor>(); };
+            t.push_back (d);
+        }
+        {
+            DeviceType d;
+            d.id = "keytape";
+            d.kind = "Synth";
+            d.name = "Keytape KT-4";
+            d.blurb = "synthesizer with a 4-track tape: engines, drums, sampler, sequencers";
+            d.widthMm = 288.0f; // (288 x 102 mm, the original's slab)
+            d.panelWidth = keytape::ui::Panel::kWidth;
+            d.panelHeight = keytape::ui::Panel::kHeight;
+            d.depthMm = d.widthMm * (float) d.panelHeight / (float) d.panelWidth;
+            d.rear = juce::Colour (0xffb9bbbe); // (the aluminium's edge)
+            // its edge: the 3.5 mm line in and out, and USB (audio in both ways, and MIDI)
+            d.jacks = { { "LINE IN L", K::AudioIn, 0 }, { "LINE IN R", K::AudioIn, 1 }, { "USB IN L", K::AudioIn, 2 }, { "USB IN R", K::AudioIn, 3 },
+                        { "USB MIDI IN", K::MidiIn },    { "USB MIDI OUT", K::MidiOut },  { "OUT L", K::AudioOut, 0 },   { "OUT R", K::AudioOut, 1 } };
+            d.pictureCorner = 16.0f / (float) keytape::ui::Panel::kWidth;
+            d.create = [] { return std::make_unique<keytape::KeytapeProcessor>(); };
             t.push_back (d);
         }
         {

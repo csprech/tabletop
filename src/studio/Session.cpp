@@ -1,5 +1,6 @@
 #include "Session.h"
 #include "BuiltIn.h"
+#include "keytape/src/plugin/KeytapeProcessor.h"
 #include "trackdesk/src/plugin/TrackdeskProcessor.h"
 
 namespace tabletop
@@ -242,6 +243,12 @@ void Session::refreshMonoInputs()
                 if (d.type->jacks[j].kind == JackSpec::Kind::AudioOut && d.type->jacks[j].channel == 5)
                     aux2 = findCable (d.uid, (int) j) >= 0;
             desk->setAux2Plugged (aux2);
+        }
+        else if (auto* kt = dynamic_cast<keytape::KeytapeProcessor*> (p))
+        {
+            // line in and USB in are heard only when cabled (a pair with only its L cabled is mono)
+            for (int c = 0; c < keytape::KeytapeProcessor::kNumInputs; ++c)
+                kt->setInputPlugged (c, pluggedChannel (c));
         }
     }
 }

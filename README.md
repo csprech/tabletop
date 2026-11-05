@@ -5,6 +5,7 @@ A studio on a table. The research instruments sit on an endless wooden table at 
 - [Valvebox](https://github.com/csprech/valvebox), a groovebox;
 - [Padlab](https://github.com/csprech/padlab), a sampling drum machine;
 - [Trackdesk](https://github.com/csprech/trackdesk), a 12-track recording console;
+- [Keytape](https://github.com/csprech/keytape), a synthesizer around a 4-track tape;
 - an audio interface and a mixer.
 
 Zoom out to see the whole setup. Double-click a device and the view flies in, so you can play its real panel.
@@ -78,9 +79,20 @@ Trackdesk's back strip has its jacks in the original's order:
 
 Its faders start down, as the original's manual asks before switching on. Its songs are saved in the same card folder as the Trackdesk app's (`Music/Trackdesk Card`), and its panel settings are saved with the table.
 
+### Keytape on the table
+
+Keytape sits at its real size, 288 × 102 mm. Its edge has these jacks:
+- **LINE IN L/R:** the mic/line input, which it samples, records and monitors. An uncabled input is silent, and with only L cabled it's mono.
+- **USB IN L/R:** the second input pair (the USB audio source on its input screen).
+- **USB MIDI IN:** notes, the original's CC map, program changes and clock. Set sync to MIDI to follow another device's clock.
+- **USB MIDI OUT:** its clock (in beat match) and ctrl mode's notes.
+- **OUT L/R:** its output. With sync out, the left channel carries the pulses.
+
+Its tapes, mixdowns and snapshots are saved in the same folder as the Keytape app's (`Music/Keytape`). Its sounds, mixer and settings are saved with the table.
+
 ### Your tables
 
-- **Saved automatically:** the table is saved when you quit (and every minute), and opens again next time. That includes every device's state: Fourpole's patch, Valvebox's whole memory, Padlab's project with its samples, Trackdesk's panel and settings, and the mixer's settings.
+- **Saved automatically:** the table is saved when you quit (and every minute), and opens again next time. That includes every device's state: Fourpole's patch, Valvebox's whole memory, Padlab's project with its samples, Trackdesk's panel and settings, Keytape's sounds and settings, and the mixer's settings.
 - **Copies:** **File > Save As** keeps a copy as a `.tabletop` file; **File > Open** brings one back.
 - **New Table** sets up the first table again: everything cabled into the mixer and on to the speakers, with MIDI from your controllers going to Fourpole.
 
@@ -102,7 +114,7 @@ Its faders start down, as the original's manual asks before switching on. Its so
 The self-test runs the real app:
 
 ```sh
-TRACKDESK_CARD_DIR=/tmp/card TABLETOP_SELFTEST=/tmp/report.txt ./build/Tabletop_artefacts/Release/Tabletop.app/Contents/MacOS/Tabletop
+TRACKDESK_CARD_DIR=/tmp/card KEYTAPE_DIR=/tmp/keytape TABLETOP_SELFTEST=/tmp/report.txt ./build/Tabletop_artefacts/Release/Tabletop.app/Contents/MacOS/Tabletop
 ```
 
 It checks:
@@ -112,8 +124,9 @@ It checks:
 - mono detection on the mixer;
 - each device's state round trip (Fourpole's patch, Valvebox's memory, Padlab's project and samples);
 - Trackdesk on the table: its size and jacks, a cable in AUX 2 turning the effect off, its state round trip;
+- Keytape on the table: its size and jacks, its outputs into the mixer, its state round trip;
 - saving and opening a table;
-- sound from the Valvebox through Trackdesk and the mixer to the speakers;
+- sound from the Valvebox through Trackdesk and the mixer to the speakers, and from Keytape's keyboard into the mixer;
 - flying in to a live panel and back;
 - removing a device along with its cables.
 

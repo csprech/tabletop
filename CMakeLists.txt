@@ -12,8 +12,8 @@ add_subdirectory(external/JUCE)
 
 # The devices: each lives in its own repository (git submodules under devices/) and is compiled into this app
 # from the source list it publishes. TABLETOP_DEVICES_DIR can point at sibling checkouts while developing.
-set(TABLETOP_DEVICES_DIR "${CMAKE_SOURCE_DIR}/devices" CACHE PATH "Folder holding the fourpole, valvebox, padlab and trackdesk repositories")
-foreach(device fourpole valvebox padlab trackdesk)
+set(TABLETOP_DEVICES_DIR "${CMAKE_SOURCE_DIR}/devices" CACHE PATH "Folder holding the fourpole, valvebox, padlab, trackdesk and keytape repositories")
+foreach(device fourpole valvebox padlab trackdesk keytape)
   if(NOT EXISTS "${TABLETOP_DEVICES_DIR}/${device}/${device}-module.cmake")
     message(FATAL_ERROR "${device} not found in ${TABLETOP_DEVICES_DIR}. Run scripts/bootstrap.sh first.")
   endif()
@@ -39,7 +39,8 @@ target_sources(Tabletop PRIVATE
   ${FOURPOLE_MODULE_SOURCES}
   ${VALVEBOX_MODULE_SOURCES}
   ${PADLAB_MODULE_SOURCES}
-  ${TRACKDESK_MODULE_SOURCES})
+  ${TRACKDESK_MODULE_SOURCES}
+  ${KEYTAPE_MODULE_SOURCES})
 padlab_add_assets(Tabletop)
 
 # the shelf's pictures of the devices (rendered by TABLETOP_RENDER_SHELF=assets/shelf)

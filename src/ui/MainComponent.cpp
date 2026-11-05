@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "ShelfPictures.h"
+#include "keytape/src/plugin/KeytapeProcessor.h"
 #include "trackdesk/src/plugin/TrackdeskProcessor.h"
 #include "../studio/BuiltIn.h"
 #include "fourpole/src/plugin/FourpoleProcessor.h"
@@ -577,6 +578,36 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
         }
     }
 
+    lines->add ("-- the tape synth: Keytape into the mixer");
+    juce::String kt;
+    {
+        kt = session.addDevice ("keytape", { -420.0f, 330.0f });
+        table.rebuild();
+        auto* tape = dynamic_cast<keytape::KeytapeProcessor*> (session.getProcessor (kt));
+        check (tape != nullptr, "Keytape on the table");
+        check (table.findNode (kt) != nullptr && table.findNode (kt)->getEditor() != nullptr, "with its panel");
+        const auto* type = findDeviceType ("keytape");
+        check (type != nullptr && std::abs (type->widthMm - 288.0f) < 0.1f && std::abs (type->depthMm - 103.0f) < 1.5f && type->jacks.size() == 8,
+               "life size (288 x 102 mm) with its 8 jacks");
+        check (session.connect (kt, jack (kt, "OUT L"), mx, jack (mx, "6 L")) && session.connect (kt, jack (kt, "OUT R"), mx, jack (mx, "6 R")),
+               "Keytape OUT L/R into the mixer's channel 6");
+        check (session.canConnect (fp, jack (fp, "OUTPUT"), kt, jack (kt, "LINE IN L")) == false, "(Fourpole's output is in use)");
+        check (session.canConnect (vb, jack (vb, "OUT 3"), kt, jack (kt, "LINE IN L")), "a line into its input");
+        if (tape != nullptr)
+        {
+            tape->getEngine().withMachine ([] (keytape::Machine& m) {
+                m.tempo.bpm = 97.0;
+                m.mixer.level[2] = 0.31f;
+            });
+            juce::MemoryBlock mb;
+            tape->getStateInformation (mb);
+            keytape::KeytapeProcessor fresh;
+            fresh.setStateInformation (mb.getData(), (int) mb.getSize());
+            const auto back = fresh.getEngine().withMachine ([] (keytape::Machine& m) { return std::make_pair (m.tempo.bpm, m.mixer.level[2]); });
+            check (std::abs (back.first - 97.0) < 1.0e-9 && std::abs (back.second - 0.31f) < 1.0e-6f, "Keytape: its sounds, mixer and tempo");
+        }
+    }
+
     lines->add ("-- the table survives saving and opening");
     {
         const auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("tabletop-selftest.tabletop");
@@ -597,21 +628,30 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
         tmp.deleteFile();
     }
 
-    lines->add ("-- sound: Valvebox through the mixer to the speakers");
+    lines->add ("-- sound: Valvebox through the mixer to the speakers, and Keytape's keyboard");
     const auto vbNow = find ("valvebox");
+    const auto ktNow = find ("keytape");
+    if (auto* p = dynamic_cast<keytape::KeytapeProcessor*> (session.getProcessor (ktNow)))
+        p->getEngine().withMachine ([] (keytape::Machine& m) { m.keyDown (12, 0.8f); });
     if (auto* p = dynamic_cast<valvebox::ValveboxProcessor*> (session.getProcessor (vbNow)))
         p->getEngine().withMachine ([] (valvebox::Machine& m) {
             m.press (valvebox::Key::PlayPause);
             m.release (valvebox::Key::PlayPause);
         });
-    juce::Timer::callAfterDelay (1500, [this, lines, failures, check, find, reportFile, vbNow] {
-        float speakers = 0.0f, channel1 = 0.0f;
+    juce::Timer::callAfterDelay (1500, [this, lines, failures, check, find, reportFile, vbNow, ktNow] {
+        float speakers = 0.0f, channel1 = 0.0f, channel6 = 0.0f;
         if (auto* iface = dynamic_cast<InterfaceProcessor*> (session.getProcessor (find ("interface"))))
             speakers = std::max (iface->peaks[0].load(), iface->peaks[1].load());
         if (auto* mixer = dynamic_cast<MixerProcessor*> (session.getProcessor (find ("mixer"))))
+        {
             channel1 = mixer->channels[0].peak.load();
+            channel6 = mixer->channels[5].peak.load();
+        }
         check (channel1 > 0.01f, "mixer channel 1 hears the Valvebox through Trackdesk (" + juce::String (channel1, 3) + ")");
         check (speakers > 0.01f, "the speakers hear the mix (" + juce::String (speakers, 3) + ")");
+        check (channel6 > 0.01f, "mixer channel 6 hears Keytape's keyboard (" + juce::String (channel6, 3) + ")");
+        if (auto* p = dynamic_cast<keytape::KeytapeProcessor*> (session.getProcessor (ktNow)))
+            p->getEngine().withMachine ([] (keytape::Machine& m) { m.keyUp (12); });
         if (auto* p = dynamic_cast<valvebox::ValveboxProcessor*> (session.getProcessor (vbNow)))
             p->getEngine().withMachine ([] (valvebox::Machine& m) {
                 m.press (valvebox::Key::StopCancel);
