@@ -7,9 +7,28 @@ namespace tabletop
 {
 using Graph = juce::AudioProcessorGraph;
 
+namespace
+{
+    bool testing() { return std::getenv ("TABLETOP_SELFTEST") != nullptr; }
+} // namespace
+
+juce::File Session::audioSettingsFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Tabletop").getChildFile ("Audio Device.xml");
+}
+
 Session::Session()
 {
-    deviceManager.initialiseWithDefaultDevices (0, 2);
+    // the audio device you chose in Audio/MIDI last time (the self-test always uses the defaults)
+    std::unique_ptr<juce::XmlElement> saved;
+    if (! testing())
+        saved = juce::XmlDocument::parse (audioSettingsFile());
+    if (saved == nullptr || deviceManager.initialise (0, 2, saved.get(), true).isNotEmpty())
+        deviceManager.initialiseWithDefaultDevices (0, 2);
+    // (the computer's input stays closed until something is cabled to the interface's IN jacks)
+    inputOpen = deviceManager.getAudioDeviceSetup().inputChannels.countNumberOfSetBits() > 0;
+    refreshAudioInput();
+    deviceManager.addChangeListener (this);
     graph.enableAllBuses();
     audioInNode = graph.addNode (std::make_unique<Graph::AudioGraphIOProcessor> (Graph::AudioGraphIOProcessor::audioInputNode))->nodeID;
     audioOutNode = graph.addNode (std::make_unique<Graph::AudioGraphIOProcessor> (Graph::AudioGraphIOProcessor::audioOutputNode))->nodeID;
@@ -27,11 +46,24 @@ Session::Session()
 Session::~Session()
 {
     midiDeviceListConnection.reset();
+    deviceManager.removeChangeListener (this);
     deviceManager.removeMidiInputDeviceCallback ({}, &player);
     deviceManager.removeAudioCallback (&player);
     player.setProcessor (nullptr);
     graph.clear();
     deviceManager.closeAudioDevice();
+}
+
+void Session::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    wireComputerInputs();
+    if (testing())
+        return;
+    if (auto xml = deviceManager.createStateXml())
+    {
+        audioSettingsFile().getParentDirectory().createDirectory();
+        xml->writeTo (audioSettingsFile());
+    }
 }
 
 void Session::midiDevicesChanged()
@@ -199,23 +231,65 @@ void Session::disconnect (int index)
     changed();
 }
 
-void Session::wire (const Cable& c, bool add)
+Graph::Connection Session::connectionFor (const Cable& c) const
 {
     const auto* from = findDevice (c.from);
     const auto* to = findDevice (c.to);
     if (from == nullptr || to == nullptr)
-        return;
+        return {};
     const auto& jf = from->type->jacks[(size_t) c.fromJack];
     const auto& jt = to->type->jacks[(size_t) c.toJack];
-    // The interface's MIDI jack comes straight from the graph's MIDI input. Going through the interface's node would
-    // make a loop whenever the cabled device reaches the speakers, and the graph gives a loop's MIDI an empty buffer.
-    const bool fromComputerMidi = from->type->id == "interface" && jf.isMidi();
-    const Graph::Connection conn { { fromComputerMidi ? midiInNode : from->node, jf.isMidi() ? Graph::midiChannelIndex : jf.channel },
-                                   { to->node, jt.isMidi() ? Graph::midiChannelIndex : jt.channel } };
+    const Graph::NodeAndChannel dest { to->node, jt.isMidi() ? Graph::midiChannelIndex : jt.channel };
+    // The interface's MIDI and IN jacks come straight from the graph's MIDI and audio inputs. Going through the
+    // interface's node would make a loop whenever the cabled device reaches the speakers, and the graph gives a loop
+    // an empty buffer (silence, no notes). The interface keeps its own connections, for its lights and meters.
+    if (from->type->id == "interface")
+    {
+        if (jf.isMidi())
+            return { { midiInNode, Graph::midiChannelIndex }, dest };
+        if (jf.channel >= 2) // IN 1, IN 2: the interface's outputs 2 and 3 are the computer's inputs 0 and 1
+            return { { audioInNode, jf.channel - 2 }, dest };
+    }
+    return { { from->node, jf.isMidi() ? Graph::midiChannelIndex : jf.channel }, dest };
+}
+
+void Session::wire (const Cable& c, bool add)
+{
+    if (findDevice (c.from) == nullptr || findDevice (c.to) == nullptr)
+        return;
+    const auto conn = connectionFor (c);
     if (add)
         graph.addConnection (conn);
     else
         graph.removeConnection (conn);
+}
+
+bool Session::cableComesFromComputer (int index) const
+{
+    if (! juce::isPositiveAndBelow (index, (int) cables.size()))
+        return false;
+    const auto conn = connectionFor (cables[(size_t) index]);
+    return conn.source.nodeID == audioInNode || conn.source.nodeID == midiInNode;
+}
+
+bool Session::cableIsWired (int index) const
+{
+    return juce::isPositiveAndBelow (index, (int) cables.size()) && graph.isConnected (connectionFor (cables[(size_t) index]));
+}
+
+void Session::wireComputerInputs()
+{
+    // the graph refuses a connection from an input channel the device doesn't have, so these are made again
+    // whenever the input opens or the device changes: the interface's own (its IN meters) and the IN cables
+    for (auto& d : devices)
+        if (d.type->id == "interface")
+        {
+            graph.addConnection ({ { audioInNode, 0 }, { d.node, 2 } });
+            graph.addConnection ({ { audioInNode, 1 }, { d.node, 3 } });
+        }
+    for (auto& c : cables)
+        if (const auto conn = connectionFor (c); conn.source.nodeID == audioInNode && ! graph.isConnected (conn))
+            graph.addConnection (conn);
 }
 
 void Session::refreshMonoInputs()
@@ -269,9 +343,22 @@ void Session::refreshAudioInput()
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
     if (wanted)
+    {
         setup.inputChannels.setRange (0, 2, true);
+        // the device started with no inputs, so it has no input device yet: the computer's default one (unless you
+        // chose one in Audio/MIDI). Without a name, asking for input channels opens nothing.
+        if (setup.inputDeviceName.isEmpty())
+            if (auto* type = deviceManager.getCurrentDeviceTypeObject())
+            {
+                type->scanForDevices();
+                const auto names = type->getDeviceNames (true);
+                if (! names.isEmpty())
+                    setup.inputDeviceName = names[juce::jlimit (0, names.size() - 1, type->getDefaultDeviceIndex (true))];
+            }
+    }
     deviceManager.setAudioDeviceSetup (setup, true);
     inputOpen = wanted;
+    wireComputerInputs();
 }
 
 // ---------------------------------------------------------------- files

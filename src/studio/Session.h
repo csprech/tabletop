@@ -8,11 +8,11 @@
 
 namespace tabletop
 {
-class Session
+class Session : private juce::ChangeListener
 {
 public:
     Session();
-    ~Session();
+    ~Session() override;
 
     struct Device
     {
@@ -51,6 +51,11 @@ public:
     const std::vector<Cable>& getCables() const { return cables; }
     /** The cable plugged into a jack, or -1. */
     int findCable (const juce::String& uid, int jack) const;
+    /** Whether a cable from the interface is fed straight from the computer (its audio input or MIDI), not
+        through the interface's node, so a device whose sound comes back to the speakers isn't in a loop. */
+    bool cableComesFromComputer (int cableIndex) const;
+    /** Whether a cable's connection is in the graph (one from the computer's input can't be while it has none). */
+    bool cableIsWired (int cableIndex) const;
     juce::Colour nextCableColour (bool midi);
 
     // ---- files
@@ -70,6 +75,11 @@ private:
     void refreshMonoInputs();
     void refreshAudioInput();
     void midiDevicesChanged();
+    /** (Re)makes the connections from the computer's audio input: its channels come and go with the device. */
+    void wireComputerInputs();
+    void changeListenerCallback (juce::ChangeBroadcaster*) override; // (the audio device changed: remember it)
+    juce::AudioProcessorGraph::Connection connectionFor (const Cable& c) const;
+    static juce::File audioSettingsFile();
     void changed()
     {
         if (onChange)

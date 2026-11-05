@@ -64,9 +64,9 @@ open build/Tabletop_artefacts/Release/Tabletop.app
 
 - **Audio interface:** your computer, on the table.
   - Cable to its **SPEAKERS** jacks to hear something. With only L cabled, both speakers play it.
-  - **IN 1** and **IN 2** are your computer's audio inputs. macOS asks for permission the first time you cable them.
+  - **IN 1** and **IN 2** are your computer's audio inputs (its default input, or the one you pick in Audio/MIDI). macOS asks for permission the first time you cable them.
   - Its **MIDI** jack carries every MIDI controller you plug into the computer, now or later.
-  - **Audio/MIDI** picks the computer's audio device.
+  - **Audio/MIDI** picks the computer's audio devices. Tabletop remembers your choice.
 - **Mixer MX-6:** six stereo channels, each with a fader, PAN and MUTE, plus the MAIN fader and meters. A channel with only its L jack cabled is mono.
 
 ### Trackdesk on the table
@@ -128,6 +128,7 @@ It checks:
 - saving and opening a table;
 - sound from the Valvebox through Trackdesk and the mixer to the speakers, and from Keytape's keyboard into the mixer;
 - a controller's note through the interface's MIDI jack to Fourpole;
+- the IN and MIDI jacks fed straight from the computer, and the input opening on a named device (and closing when unplugged);
 - flying in to a live panel and back;
 - removing a device along with its cables.
 

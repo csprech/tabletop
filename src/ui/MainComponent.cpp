@@ -618,6 +618,27 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
         }
     }
 
+    lines->add ("-- the computer's input and MIDI: straight to the devices, no loop through the interface");
+    {
+        const auto ktIn = jack (kt, "LINE IN L");
+        check (session.connect (ai, jack (ai, "IN 1"), kt, ktIn), "the interface's IN 1 into Keytape's LINE IN L");
+        check (session.cableComesFromComputer (session.findCable (kt, ktIn)),
+               "fed from the computer's input, not through the interface (Keytape reaches the speakers)");
+        check (session.cableComesFromComputer (session.findCable (fp, jack (fp, "MIDI IN"))), "and Fourpole's MIDI straight from the computer");
+        check (! session.cableComesFromComputer (session.findCable (vb, jack (vb, "OUT L"))), "(other cables run device to device)");
+        const auto setup = session.getDeviceManager().getAudioDeviceSetup();
+        juce::StringArray inputs;
+        if (auto* t = session.getDeviceManager().getCurrentDeviceTypeObject())
+            inputs = t->getDeviceNames (true);
+        if (inputs.isEmpty())
+            lines->add ("--    (this computer has no audio input: the input can't open, so the next two only apply elsewhere)");
+        check (inputs.isEmpty() || (setup.inputChannels.countNumberOfSetBits() == 2 && setup.inputDeviceName.isNotEmpty()),
+               "the input opens on a named device: " + (inputs.isEmpty() ? juce::String ("(none here)") : setup.inputDeviceName));
+        check (inputs.isEmpty() || session.cableIsWired (session.findCable (kt, ktIn)), "and the cable carries it");
+        session.disconnect (session.findCable (kt, ktIn));
+        check (session.getDeviceManager().getAudioDeviceSetup().inputChannels.countNumberOfSetBits() == 0, "unplugged: the input closes again");
+    }
+
     lines->add ("-- the table survives saving and opening");
     {
         const auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("tabletop-selftest.tabletop");
