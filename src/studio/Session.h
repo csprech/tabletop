@@ -60,6 +60,8 @@ public:
     bool fromJson (const juce::var& json);
 
     juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
+    /** Where the computer's MIDI inputs arrive: the self-test plays a controller through it. */
+    juce::MidiMessageCollector& getComputerMidi() { return player.getMidiMessageCollector(); }
     /** Called after anything changes (devices, cables, positions). */
     std::function<void()> onChange;
 

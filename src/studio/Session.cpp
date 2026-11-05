@@ -207,7 +207,10 @@ void Session::wire (const Cable& c, bool add)
         return;
     const auto& jf = from->type->jacks[(size_t) c.fromJack];
     const auto& jt = to->type->jacks[(size_t) c.toJack];
-    const Graph::Connection conn { { from->node, jf.isMidi() ? Graph::midiChannelIndex : jf.channel },
+    // The interface's MIDI jack comes straight from the graph's MIDI input. Going through the interface's node would
+    // make a loop whenever the cabled device reaches the speakers, and the graph gives a loop's MIDI an empty buffer.
+    const bool fromComputerMidi = from->type->id == "interface" && jf.isMidi();
+    const Graph::Connection conn { { fromComputerMidi ? midiInNode : from->node, jf.isMidi() ? Graph::midiChannelIndex : jf.channel },
                                    { to->node, jt.isMidi() ? Graph::midiChannelIndex : jt.channel } };
     if (add)
         graph.addConnection (conn);
