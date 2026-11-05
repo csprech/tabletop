@@ -45,7 +45,8 @@ open build/Tabletop_artefacts/Release/Tabletop.app
 
 ### Devices
 
-- **Add one:** drag it from the shelf on the left onto the table, or right-click the wood and choose "Put on the table". There's one audio interface; you can add as many of everything else as you like.
+- **The shelf:** down the left, each device is shown as a small picture of itself, with its name, what it is (synth, drum machine, mixer...) and its size.
+- **Add one:** drag it from the shelf onto the table, or right-click the wood and choose "Put on the table". There's one audio interface; you can add as many of everything else as you like.
 - **Move one:** drag it.
 - **Remove one:** right-click it, then "Take off the table". Its cables come with it.
 - **Play one:** double-click it and the view flies in to its real, live panel. Everything on it works as it does in the device's own app, including its computer-keyboard keys.
@@ -105,6 +106,7 @@ TRACKDESK_CARD_DIR=/tmp/card TABLETOP_SELFTEST=/tmp/report.txt ./build/Tabletop_
 ```
 
 It checks:
+- the shelf: every device has its transparent picture, name and kind;
 - the first table's devices and cables;
 - the cable rules (outputs to inputs, MIDI to MIDI, one cable per jack);
 - mono detection on the mixer;
@@ -119,5 +121,6 @@ Other testing aids:
 - `TABLETOP_NO_AUTOSAVE=1` leaves your saved table alone.
 - `TABLETOP_OPEN=/path.tabletop` opens a table at launch.
 - `TABLETOP_WINDOW_SIZE=WxH` forces a window size.
+- `TABLETOP_RENDER_SHELF=assets/shelf` renders the shelf's pictures again from the devices' real panels, then quits. Do this after a device's look changes, and commit the PNG files. They're built into the app.
 
 Each device's own tests live in its repository.

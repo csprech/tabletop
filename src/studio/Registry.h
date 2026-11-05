@@ -29,9 +29,12 @@ struct JackSpec
 struct DeviceType
 {
     juce::String id, name, blurb;
+    juce::String kind;                         // what it is, for the shelf: "Synth", "Drum machine", "Mixer"...
     float widthMm = 300.0f, depthMm = 200.0f; // the body's footprint; the jack strip adds kStripDepthMm behind it
     int panelWidth = 1000, panelHeight = 700;  // the editor's natural size (it's scaled to the footprint)
     juce::Colour rear { 0xff2a2c31 };          // the back panel's colour
+    juce::Rectangle<int> panelCrop;            // the device itself within its editor, for its picture (empty: all of it)
+    float pictureCorner = 0.02f;               // its corners' radius in the picture, as a share of its width
     std::vector<JackSpec> jacks;
     std::function<std::unique_ptr<juce::AudioProcessor>()> create;
     bool unique = false; // only one per table (the audio interface)

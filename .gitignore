@@ -3,3 +3,4 @@ build-release/
 external/
 *.tabletop
 .DS_Store
+build-siblings/

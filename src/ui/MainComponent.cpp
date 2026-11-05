@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "ShelfPictures.h"
 #include "trackdesk/src/plugin/TrackdeskProcessor.h"
 #include "../studio/BuiltIn.h"
 #include "fourpole/src/plugin/FourpoleProcessor.h"
@@ -14,7 +15,7 @@ namespace
         static const bool have = juce::Font::findAllTypefaceNames().contains ("Avenir Next Condensed");
         return have ? juce::Font (juce::FontOptions ("Avenir Next Condensed", style, h)) : juce::Font (juce::FontOptions (h, juce::Font::bold));
     }
-    constexpr int kBarHeight = 44, kShelfWidth = 210;
+    constexpr int kBarHeight = 44, kShelfWidth = Shelf::kWidth;
 
     struct BarLook : juce::LookAndFeel_V4
     {
@@ -73,36 +74,64 @@ void Shelf::paint (juce::Graphics& g)
     g.drawText ("DRAG ONTO THE TABLE", r.removeFromTop (34.0f).reduced (14.0f, 0.0f), juce::Justification::centredLeft);
 }
 
+int Shelf::preferredHeight() const { return 36 + (int) cards.size() * (kCardHeight + 8) + 2; }
+
 void Shelf::resized()
 {
+    // the cards at full size if they fit, smaller (down to a point) if the window is short
     auto r = getLocalBounds().reduced (10);
     r.removeFromTop (26);
+    const int n = juce::jmax (1, (int) cards.size());
+    const int h = juce::jlimit (56, kCardHeight, (r.getHeight() + 8) / n - 8);
     for (auto& c : cards)
     {
-        c->setBounds (r.removeFromTop (78));
+        c->setBounds (r.removeFromTop (h));
         r.removeFromTop (8);
     }
+}
+
+Shelf::Card::Card (const DeviceType& t) : type (t), picture (shelfPicture (t.id)) {}
+
+juce::Rectangle<float> Shelf::Card::pictureArea() const
+{
+    return getLocalBounds().toFloat().removeFromLeft (getHeight() * 1.18f).reduced (4.0f);
 }
 
 void Shelf::Card::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    g.setColour (juce::Colours::white.withAlpha (enabled ? 0.07f : 0.03f));
-    g.fillRoundedRectangle (r, 7.0f);
-    // a strip in the device's back-panel colour, like its rear edge
-    g.setColour (type.rear.brighter (0.2f).withAlpha (enabled ? 1.0f : 0.4f));
-    g.fillRoundedRectangle (r.removeFromLeft (8.0f).reduced (0.0f, 4.0f), 3.0f);
-    r.removeFromLeft (8.0f);
+    g.setColour (juce::Colours::white.withAlpha (enabled ? 0.06f : 0.025f));
+    g.fillRoundedRectangle (r, 8.0f);
     const float a = enabled ? 1.0f : 0.4f;
+    // the device itself (its picture has room round it for its shadow)
+    const auto box = pictureArea();
+    if (picture.isValid())
+    {
+        g.setOpacity (a);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.drawImage (picture, box, juce::RectanglePlacement::centred);
+        g.setOpacity (1.0f);
+    }
+    else
+    {
+        // (a device without a picture yet: its back-panel colour)
+        g.setColour (type.rear.brighter (0.2f).withAlpha (a));
+        g.fillRoundedRectangle (box.reduced (box.getWidth() * 0.12f, box.getHeight() * 0.2f), 4.0f);
+    }
+    r.removeFromLeft (box.getRight() + 6.0f);
+    // its name, what it is, its size
+    const float lineH = juce::jmin (r.getHeight() / 3.6f, 24.0f);
+    auto text = r.withSizeKeepingCentre (r.getWidth(), lineH * 3.1f);
     g.setColour (juce::Colours::white.withAlpha (0.95f * a));
-    g.setFont (uiFont (17.0f));
-    g.drawText (type.name, r.removeFromTop (28.0f).withTrimmedTop (6.0f), juce::Justification::centredLeft);
-    g.setColour (juce::Colours::white.withAlpha (0.62f * a));
-    g.setFont (uiFont (13.0f, "Medium"));
-    g.drawFittedText (type.blurb, r.removeFromTop (30.0f).toNearestInt(), juce::Justification::topLeft, 2, 0.9f);
-    g.setColour (juce::Colours::white.withAlpha (0.4f * a));
-    g.drawText (juce::String (juce::roundToInt (type.widthMm)) + " x " + juce::String (juce::roundToInt (type.depthMm + kStripDepthMm)) + " mm",
-                r.toNearestInt(), juce::Justification::centredLeft);
+    g.setFont (uiFont (juce::jmin (17.0f, lineH * 0.85f)));
+    g.drawFittedText (type.name, text.removeFromTop (lineH).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+    g.setColour (juce::Colour (0xffe8c98a).withAlpha (0.9f * a));
+    g.setFont (uiFont (juce::jmin (13.0f, lineH * 0.66f), "Demi Bold"));
+    g.drawFittedText (type.kind.toUpperCase(), text.removeFromTop (lineH).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+    g.setColour (juce::Colours::white.withAlpha (0.42f * a));
+    g.setFont (uiFont (juce::jmin (12.0f, lineH * 0.6f), "Medium"));
+    g.drawFittedText (juce::String (juce::roundToInt (type.widthMm)) + " x " + juce::String (juce::roundToInt (type.depthMm + kStripDepthMm)) + " mm",
+                      text.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
 }
 
 void Shelf::Card::mouseDrag (const juce::MouseEvent& e)
@@ -112,7 +141,10 @@ void Shelf::Card::mouseDrag (const juce::MouseEvent& e)
     if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
     {
         dragging = true;
-        container->startDragging ("device:" + type.id, this, juce::ScaledImage (createComponentSnapshot (getLocalBounds())));
+        // the device's picture travels with the mouse
+        auto image = picture.isValid() ? juce::ScaledImage (picture, (double) picture.getWidth() / (double) juce::jmax (1.0f, pictureArea().getWidth()) * 1.25)
+                                       : juce::ScaledImage (createComponentSnapshot (getLocalBounds()));
+        container->startDragging ("device:" + type.id, this, image);
     }
 }
 
@@ -199,7 +231,7 @@ void MainComponent::resized()
     const bool focused = table.isFocused();
     table.clearOf = juce::BorderSize<int> (kBarHeight + 6, focused ? 0 : kShelfWidth + 20, 10, 10);
     shelf.setVisible (! focused);
-    shelf.setBounds (12, kBarHeight + 8, kShelfWidth, juce::jmin (getHeight() - kBarHeight - 20, 36 + (int) deviceTypes().size() * 86 + 8));
+    shelf.setBounds (12, kBarHeight + 8, kShelfWidth, juce::jmin (getHeight() - kBarHeight - 20, shelf.preferredHeight()));
     auto bar = getLocalBounds().removeFromTop (kBarHeight).reduced (12, 7);
     helpBtn.setBounds (bar.removeFromRight (70));
     bar.removeFromRight (8);
@@ -430,6 +462,16 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
         thumbs = thumbs && n->getThumbnailScale() > 0.0f && n->getEditor() != nullptr;
     check (thumbs, "every device shows its panel");
     const auto fp = find ("fourpole"), vb = find ("valvebox"), pl = find ("padlab"), mx = find ("mixer"), ai = find ("interface");
+
+    lines->add ("-- the shelf: every device with its picture, name and kind");
+    for (auto& t : deviceTypes())
+    {
+        const auto img = shelfPicture (t.id);
+        const bool transparent = img.isValid() && img.hasAlphaChannel() && img.getPixelAt (1, 1).getAlpha() == 0
+                                 && img.getPixelAt (img.getWidth() / 2, img.getHeight() / 2).getAlpha() == 255;
+        check (transparent && t.kind.isNotEmpty() && t.name.isNotEmpty(),
+               t.name + ": a transparent picture (" + juce::String (img.getWidth()) + " x " + juce::String (img.getHeight()) + "), " + t.kind);
+    }
 
     lines->add ("-- cables: outputs to inputs, MIDI to MIDI, one per jack");
     check (session.canConnect (fp, jack (fp, "OUTPUT"), mx, jack (mx, "5 L")) == false, "a jack in use takes no second cable");

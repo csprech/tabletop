@@ -35,11 +35,20 @@ target_sources(Tabletop PRIVATE
   src/ui/Wood.cpp
   src/ui/Table.cpp
   src/ui/MainComponent.cpp
+  src/ui/ShelfPictures.cpp
   ${FOURPOLE_MODULE_SOURCES}
   ${VALVEBOX_MODULE_SOURCES}
   ${PADLAB_MODULE_SOURCES}
   ${TRACKDESK_MODULE_SOURCES})
 padlab_add_assets(Tabletop)
+
+# the shelf's pictures of the devices (rendered by TABLETOP_RENDER_SHELF=assets/shelf)
+file(GLOB TABLETOP_SHELF_PNGS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/shelf/*.png")
+if(TABLETOP_SHELF_PNGS)
+  juce_add_binary_data(TabletopAssets HEADER_NAME TabletopAssets.h NAMESPACE TabletopAssets SOURCES ${TABLETOP_SHELF_PNGS})
+  target_link_libraries(Tabletop PRIVATE TabletopAssets)
+  target_compile_definitions(Tabletop PRIVATE TABLETOP_SHELF_ASSETS=1)
+endif()
 
 target_include_directories(Tabletop PRIVATE src "${TABLETOP_DEVICES_DIR}")
 target_compile_definitions(Tabletop PRIVATE

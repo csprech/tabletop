@@ -1,4 +1,5 @@
 #include "ui/MainComponent.h"
+#include "ui/ShelfPictures.h"
 
 namespace tabletop
 {
@@ -9,7 +10,17 @@ public:
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override { return false; }
 
-    void initialise (const juce::String&) override { window = std::make_unique<MainWindow> (getApplicationName()); }
+    void initialise (const juce::String&) override
+    {
+        if (auto* folder = std::getenv ("TABLETOP_RENDER_SHELF")) // the shelf's pictures, rendered again
+        {
+            for (auto& f : renderShelfPictures (juce::File (folder)))
+                std::printf ("%s\n", f.toRawUTF8());
+            quit();
+            return;
+        }
+        window = std::make_unique<MainWindow> (getApplicationName());
+    }
 
     void shutdown() override
     {

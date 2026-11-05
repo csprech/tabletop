@@ -17,6 +17,7 @@ namespace
         {
             DeviceType d;
             d.id = "valvebox";
+            d.kind = "Groovebox";
             d.name = "Valvebox VB-16";
             d.blurb = "Groovebox: drums, synths, effects, sequencer";
             d.widthMm = 358.0f;
@@ -32,6 +33,7 @@ namespace
         {
             DeviceType d;
             d.id = "padlab";
+            d.kind = "Drum machine";
             d.name = "Padlab";
             d.blurb = "Sampling drum machine and sequencer";
             d.widthMm = 404.0f;
@@ -47,6 +49,7 @@ namespace
         {
             DeviceType d;
             d.id = "fourpole";
+            d.kind = "Synth";
             d.name = "Fourpole";
             d.blurb = "Three-oscillator monophonic synthesizer";
             d.widthMm = 714.0f;
@@ -55,12 +58,14 @@ namespace
             d.depthMm = d.widthMm * (float) d.panelHeight / (float) d.panelWidth;
             d.rear = juce::Colour (0xff2a2622);
             d.jacks = { { "MIDI IN", K::MidiIn }, { "EXT IN", K::AudioIn, 0 }, { "OUTPUT", K::AudioOut, 0 } };
+            d.panelCrop = { 0, 44, fourpole::FourpoleProcessor::kPanelWidth, fourpole::FourpoleProcessor::kPanelHeight - 44 }; // (without the patch bar)
             d.create = [] { return std::make_unique<fourpole::FourpoleProcessor>(); };
             t.push_back (d);
         }
         {
             DeviceType d;
             d.id = "trackdesk";
+            d.kind = "Recording mixer";
             d.name = "Trackdesk TD-12";
             d.blurb = "12-track recording console: 10 inputs, effects, recorder";
             d.widthMm = 343.0f;
@@ -86,12 +91,15 @@ namespace
             d.jacks.push_back ({ "PHONES 1 R", K::AudioOut, 7 });
             d.jacks.push_back ({ "PHONES 2 L", K::AudioOut, 8 });
             d.jacks.push_back ({ "PHONES 2 R", K::AudioOut, 9 });
+            d.panelCrop = { 14, 32, 1461, 1532 }; // (the chassis, without the desk round it)
+            d.pictureCorner = 0.0096f;
             d.create = [] { return std::make_unique<trackdesk::TrackdeskProcessor>(); };
             t.push_back (d);
         }
         {
             DeviceType d;
             d.id = "mixer";
+            d.kind = "Mixer";
             d.name = "Mixer MX-6";
             d.blurb = "Six stereo channels into the main out";
             d.widthMm = 330.0f;
@@ -112,6 +120,7 @@ namespace
         {
             DeviceType d;
             d.id = "interface";
+            d.kind = "Audio interface";
             d.name = "Audio Interface";
             d.blurb = "Your speakers, your computer's inputs and MIDI controllers";
             d.widthMm = 240.0f;

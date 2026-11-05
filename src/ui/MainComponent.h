@@ -13,15 +13,21 @@ public:
     void resized() override;
     /** Greys out what can't go on the table again (a second audio interface). */
     void refresh (const Session&);
+    /** The height that shows every card at its full size. */
+    int preferredHeight() const;
+    static constexpr int kWidth = 250, kCardHeight = 96;
 
 private:
+    /** A device on the shelf: its picture, its name and what it is. */
     struct Card : juce::Component
     {
-        explicit Card (const DeviceType& t) : type (t) {}
+        explicit Card (const DeviceType& t);
         void paint (juce::Graphics&) override;
         void mouseDrag (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override { dragging = false; }
+        juce::Rectangle<float> pictureArea() const;
         const DeviceType& type;
+        juce::Image picture; // (transparent, rendered at about twice the size it's shown)
         bool enabled = true, dragging = false;
     };
     std::vector<std::unique_ptr<Card>> cards;
