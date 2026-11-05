@@ -73,3 +73,47 @@ target_link_libraries(Tabletop PRIVATE
   juce::juce_recommended_config_flags
   juce::juce_recommended_lto_flags
   juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------- the GPUI front end's bridge
+# A static library with the studio (the session and its audio graph, every device and its panel) behind the C
+# interface in bridge/TableBridge.h. gpui/build.rs builds and links it (and the assets: Padlab's font, the shelf).
+option(TABLETOP_BUILD_BRIDGE "Build the bridge for the GPUI front end" OFF)
+if(TABLETOP_BUILD_BRIDGE)
+  add_library(tabletop_bridge STATIC
+    src/studio/Registry.cpp
+    src/studio/BuiltIn.cpp
+    src/studio/Session.cpp
+    src/ui/Wood.cpp
+    src/ui/ShelfPictures.cpp
+    bridge/TableBridge.cpp
+    ${FOURPOLE_MODULE_SOURCES}
+    ${VALVEBOX_MODULE_SOURCES}
+    ${PADLAB_MODULE_SOURCES}
+    ${TRACKDESK_MODULE_SOURCES}
+    ${KEYTAPE_MODULE_SOURCES})
+  padlab_add_assets(tabletop_bridge)
+  if(TABLETOP_SHELF_PNGS)
+    target_link_libraries(tabletop_bridge PRIVATE TabletopAssets)
+    target_compile_definitions(tabletop_bridge PRIVATE TABLETOP_SHELF_ASSETS=1)
+  endif()
+  target_include_directories(tabletop_bridge PRIVATE src "${TABLETOP_DEVICES_DIR}")
+  target_compile_definitions(tabletop_bridge PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_USE_MP3AUDIOFORMAT=0
+    JUCE_PLUGINHOST_VST3=0
+    JUCE_PLUGINHOST_AU=0
+    JUCE_STANDALONE_APPLICATION=0
+    JUCE_APPLICATION_NAME_STRING="Tabletop"
+    JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
+  target_compile_options(tabletop_bridge PRIVATE -Wno-float-equal)
+  target_link_libraries(tabletop_bridge PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_processors
+    juce::juce_audio_devices
+    juce::juce_audio_formats
+    juce::juce_dsp
+    juce::juce_gui_extra
+    PUBLIC
+    juce::juce_recommended_config_flags)
+endif()

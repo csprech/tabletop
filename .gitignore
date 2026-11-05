@@ -4,3 +4,5 @@ external/
 *.tabletop
 .DS_Store
 build-siblings/
+build-bridge/
+gpui/target/
