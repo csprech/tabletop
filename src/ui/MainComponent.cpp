@@ -638,9 +638,15 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
         tmp.deleteFile();
     }
 
-    lines->add ("-- sound: Valvebox through the mixer to the speakers, and Keytape's keyboard");
+    lines->add ("-- sound: Valvebox through the mixer to the speakers, Keytape's keyboard, and a controller playing Fourpole");
     const auto vbNow = find ("valvebox");
     const auto ktNow = find ("keytape");
+    const auto fpNow = find ("fourpole");
+    const auto controller = [this] (const juce::MidiMessage& m) {
+        session.getComputerMidi().addMessageToQueue (juce::MidiMessage (m, juce::Time::getMillisecondCounterHiRes() * 0.001));
+    };
+    check (session.findCable (fpNow, jack (fpNow, "MIDI IN")) >= 0, "Fourpole is cabled to the interface's MIDI jack");
+    controller (juce::MidiMessage::noteOn (1, 60, 0.8f));
     if (auto* p = dynamic_cast<keytape::KeytapeProcessor*> (session.getProcessor (ktNow)))
         p->getEngine().withMachine ([] (keytape::Machine& m) { m.keyDown (12, 0.8f); });
     if (auto* p = dynamic_cast<valvebox::ValveboxProcessor*> (session.getProcessor (vbNow)))
@@ -648,7 +654,7 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
             m.press (valvebox::Key::PlayPause);
             m.release (valvebox::Key::PlayPause);
         });
-    juce::Timer::callAfterDelay (1500, [this, lines, failures, check, find, reportFile, vbNow, ktNow] {
+    juce::Timer::callAfterDelay (1500, [this, lines, failures, check, find, reportFile, vbNow, ktNow, fpNow, controller] {
         float speakers = 0.0f, channel1 = 0.0f, channel6 = 0.0f;
         if (auto* iface = dynamic_cast<InterfaceProcessor*> (session.getProcessor (find ("interface"))))
             speakers = std::max (iface->peaks[0].load(), iface->peaks[1].load());
@@ -660,6 +666,12 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
         check (channel1 > 0.01f, "mixer channel 1 hears the Valvebox through Trackdesk (" + juce::String (channel1, 3) + ")");
         check (speakers > 0.01f, "the speakers hear the mix (" + juce::String (speakers, 3) + ")");
         check (channel6 > 0.01f, "mixer channel 6 hears Keytape's keyboard (" + juce::String (channel6, 3) + ")");
+        if (auto* p = dynamic_cast<fourpole::FourpoleProcessor*> (session.getProcessor (fpNow)))
+        {
+            check (p->getEngine().isMidiKeyDown (60), "a controller's note reaches Fourpole through the interface's MIDI jack");
+            check (p->getEngine().getOutputLevel() > 0.01f, "and Fourpole plays it (" + juce::String (p->getEngine().getOutputLevel(), 3) + ")");
+        }
+        controller (juce::MidiMessage::noteOff (1, 60));
         if (auto* p = dynamic_cast<keytape::KeytapeProcessor*> (session.getProcessor (ktNow)))
             p->getEngine().withMachine ([] (keytape::Machine& m) { m.keyUp (12); });
         if (auto* p = dynamic_cast<valvebox::ValveboxProcessor*> (session.getProcessor (vbNow)))

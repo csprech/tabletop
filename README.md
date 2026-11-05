@@ -127,6 +127,7 @@ It checks:
 - Keytape on the table: its size and jacks, its outputs into the mixer, its state round trip;
 - saving and opening a table;
 - sound from the Valvebox through Trackdesk and the mixer to the speakers, and from Keytape's keyboard into the mixer;
+- a controller's note through the interface's MIDI jack to Fourpole;
 - flying in to a live panel and back;
 - removing a device along with its cables.
 
