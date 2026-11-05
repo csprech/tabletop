@@ -197,6 +197,16 @@ MainComponent::MainComponent()
     updateTitle();
     shelf.refresh (session);
     startTimer (60 * 1000);
+    if (auto* focus = std::getenv ("TABLETOP_FOCUS")) // testing aid: fly in to the first device of a type ("keytape")
+        juce::Timer::callAfterDelay (1500, [safe = juce::Component::SafePointer<MainComponent> (this), type = juce::String (focus)] {
+            if (safe != nullptr)
+                for (auto& d : safe->session.getDevices())
+                    if (d.type->id == type)
+                    {
+                        safe->table.focusOn (d.uid);
+                        break;
+                    }
+        });
     if (auto* report = std::getenv ("TABLETOP_SELFTEST"))
         juce::Timer::callAfterDelay (1500, [safe = juce::Component::SafePointer<MainComponent> (this), f = juce::File (report)] {
             if (safe != nullptr)

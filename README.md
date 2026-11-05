@@ -12,9 +12,9 @@ Zoom out to see the whole setup. Double-click a device and the view flies in, so
 
 C++20 / JUCE 8, macOS (Apple Silicon tested). Each device lives in its own repository and is built into Tabletop from there. More devices will follow the same pattern.
 
-![The table: Valvebox, Padlab and Fourpole cabled into the mixer and the audio interface](docs/tabletop.jpg)
+![The table: Valvebox, Padlab, Keytape and Fourpole in front; the audio interface, the mixer and Trackdesk behind, all cabled up](docs/tabletop.jpg)
 
-![Zoomed in on the Valvebox to play it, its jacks along the back](docs/tabletop-playing.jpg)
+![Zoomed in on Keytape to play it, its jacks along the back](docs/tabletop-playing.jpg)
 
 ## Build & run
 
@@ -22,7 +22,7 @@ C++20 / JUCE 8, macOS (Apple Silicon tested). Each device lives in its own repos
 
 - **Xcode Command Line Tools**: `xcode-select --install`
 - **CMake 3.22+ and Ninja**, e.g. `brew install cmake ninja`
-- Access to the device repositories on GitHub (they're git submodules).
+- Nothing else: the device repositories are public, and `bootstrap.sh` fetches them (they're git submodules).
 
 ### Build
 
@@ -134,6 +134,7 @@ Other testing aids:
 - `TABLETOP_NO_AUTOSAVE=1` leaves your saved table alone.
 - `TABLETOP_OPEN=/path.tabletop` opens a table at launch.
 - `TABLETOP_WINDOW_SIZE=WxH` forces a window size.
+- `TABLETOP_FOCUS=keytape` flies in to the first device of that type after launch (for pictures).
 - `TABLETOP_RENDER_SHELF=assets/shelf` renders the shelf's pictures again from the devices' real panels, then quits. Do this after a device's look changes, and commit the PNG files. They're built into the app.
 
 Each device's own tests live in its repository.
