@@ -4,6 +4,7 @@ A studio on a table. The research instruments sit on an endless wooden table at 
 - [Fourpole](https://github.com/csprech/fourpole), a three-oscillator monosynth;
 - [Valvebox](https://github.com/csprech/valvebox), a groovebox;
 - [Padlab](https://github.com/csprech/padlab), a sampling drum machine;
+- [Trackdesk](https://github.com/csprech/trackdesk), a 12-track recording console;
 - an audio interface and a mixer.
 
 Zoom out to see the whole setup. Double-click a device and the view flies in, so you can play its real panel.
@@ -66,9 +67,19 @@ open build/Tabletop_artefacts/Release/Tabletop.app
   - **Audio/MIDI** picks the computer's audio device.
 - **Mixer MX-6:** six stereo channels, each with a fader, PAN and MUTE, plus the MAIN fader and meters. A channel with only its L jack cabled is mono.
 
+### Trackdesk on the table
+
+Trackdesk's back strip has its jacks in the original's order:
+- **IN 1–6, 7/8 L/R and 9/10 L/R:** the channel inputs. An uncabled input is silent, and a stereo channel with only L cabled is mono.
+- **MIDI OUT:** the console's MIDI clock and time code, to drive another sequencer (Valvebox follows it with its clock set to external).
+- **CLICK, AUX 1, AUX 2, SUB L/R, MAIN L/R, PHONES 1/2 L/R:** its outputs. A cable in AUX 2 makes the built-in effect unavailable (FX.N/A), as on the original.
+- **USB L/R:** what PC mode hears on channels 1–2.
+
+Its faders start down, as the original's manual asks before switching on. Its songs are saved in the same card folder as the Trackdesk app's (`Music/Trackdesk Card`), and its panel settings are saved with the table.
+
 ### Your tables
 
-- **Saved automatically:** the table is saved when you quit (and every minute), and opens again next time. That includes every device's state: Fourpole's patch, Valvebox's whole memory, Padlab's project with its samples, and the mixer's settings.
+- **Saved automatically:** the table is saved when you quit (and every minute), and opens again next time. That includes every device's state: Fourpole's patch, Valvebox's whole memory, Padlab's project with its samples, Trackdesk's panel and settings, and the mixer's settings.
 - **Copies:** **File > Save As** keeps a copy as a `.tabletop` file; **File > Open** brings one back.
 - **New Table** sets up the first table again: everything cabled into the mixer and on to the speakers, with MIDI from your controllers going to Fourpole.
 
@@ -90,7 +101,7 @@ open build/Tabletop_artefacts/Release/Tabletop.app
 The self-test runs the real app:
 
 ```sh
-TABLETOP_SELFTEST=/tmp/report.txt ./build/Tabletop_artefacts/Release/Tabletop.app/Contents/MacOS/Tabletop
+TRACKDESK_CARD_DIR=/tmp/card TABLETOP_SELFTEST=/tmp/report.txt ./build/Tabletop_artefacts/Release/Tabletop.app/Contents/MacOS/Tabletop
 ```
 
 It checks:
@@ -98,8 +109,9 @@ It checks:
 - the cable rules (outputs to inputs, MIDI to MIDI, one cable per jack);
 - mono detection on the mixer;
 - each device's state round trip (Fourpole's patch, Valvebox's memory, Padlab's project and samples);
+- Trackdesk on the table: its size and jacks, a cable in AUX 2 turning the effect off, its state round trip;
 - saving and opening a table;
-- sound from the Valvebox through the mixer to the speakers;
+- sound from the Valvebox through Trackdesk and the mixer to the speakers;
 - flying in to a live panel and back;
 - removing a device along with its cables.
 

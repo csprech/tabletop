@@ -7,3 +7,6 @@
 [submodule "devices/padlab"]
 	path = devices/padlab
 	url = https://github.com/csprech/padlab.git
+[submodule "devices/trackdesk"]
+	path = devices/trackdesk
+	url = https://github.com/csprech/trackdesk.git

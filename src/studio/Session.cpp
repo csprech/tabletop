@@ -1,5 +1,6 @@
 #include "Session.h"
 #include "BuiltIn.h"
+#include "trackdesk/src/plugin/TrackdeskProcessor.h"
 
 namespace tabletop
 {
@@ -230,6 +231,18 @@ void Session::refreshMonoInputs()
         else if (auto* mixer = dynamic_cast<MixerProcessor*> (p))
             for (int c = 0; c < MixerProcessor::kChannels; ++c)
                 mixer->channels[(size_t) c].stereo = pluggedChannel (c * 2 + 1);
+        else if (auto* desk = dynamic_cast<trackdesk::TrackdeskProcessor*> (p))
+        {
+            // the console hears only cabled inputs (a stereo channel with only L cabled is mono); a cable in AUX 2
+            // takes the built-in effect away, as on the original
+            for (int c = 0; c < trackdesk::TrackdeskProcessor::kNumInputs; ++c)
+                desk->setInputPlugged (c, pluggedChannel (c));
+            bool aux2 = false;
+            for (size_t j = 0; j < d.type->jacks.size(); ++j)
+                if (d.type->jacks[j].kind == JackSpec::Kind::AudioOut && d.type->jacks[j].channel == 5)
+                    aux2 = findCable (d.uid, (int) j) >= 0;
+            desk->setAux2Plugged (aux2);
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "trackdesk/src/plugin/TrackdeskProcessor.h"
 #include "../studio/BuiltIn.h"
 #include "fourpole/src/plugin/FourpoleProcessor.h"
 #include "padlab/src/plugin/PadlabProcessor.h"
@@ -496,6 +497,44 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
                "Padlab: the project, samples and all (" + juce::String (samples) + " samples, " + juce::String ((int) (m.getSize() / 1024)) + " KB)");
     }
 
+    lines->add ("-- the recording console: Valvebox through Trackdesk into the mixer");
+    {
+        const auto td = session.addDevice ("trackdesk", { 420.0f, 330.0f });
+        table.rebuild();
+        auto* desk = dynamic_cast<trackdesk::TrackdeskProcessor*> (session.getProcessor (td));
+        check (desk != nullptr, "Trackdesk on the table");
+        check (table.findNode (td) != nullptr && table.findNode (td)->getEditor() != nullptr, "with its panel");
+        const auto* type = findDeviceType ("trackdesk");
+        check (type != nullptr && std::abs (type->widthMm - 343.0f) < 0.1f && std::abs (type->depthMm - 361.0f) < 2.0f && type->jacks.size() == 24,
+               "life size (343 x 360 mm) with its 24 jacks");
+        session.disconnect (session.findCable (vb, jack (vb, "OUT L")));
+        session.disconnect (session.findCable (vb, jack (vb, "OUT R")));
+        check (session.connect (vb, jack (vb, "OUT L"), td, jack (td, "7/8 L")) && session.connect (vb, jack (vb, "OUT R"), td, jack (td, "7/8 R")),
+               "Valvebox OUT L/R into channel 7/8");
+        check (session.connect (td, jack (td, "MAIN L"), mx, jack (mx, "1 L")) && session.connect (td, jack (td, "MAIN R"), mx, jack (mx, "1 R")),
+               "Trackdesk MAIN L/R into the mixer's channel 1");
+        check (! session.canConnect (td, jack (td, "MAIN L"), td, jack (td, "IN 1")), "not into itself");
+        if (desk != nullptr)
+        {
+            desk->getEngine().withDesk ([] (trackdesk::Desk& d) {
+                d.setKnob (6, trackdesk::StripKnob::Gain, 0.4f); // 0 dB on a stereo line input
+                d.setKnob (6, trackdesk::StripKnob::Fader, trackdesk::law::kFaderUnity);
+                d.setMasterKnob (trackdesk::MasterKnob::MainFader, trackdesk::law::kFaderUnity);
+            });
+            check (desk->getEngine().withDesk ([] (trackdesk::Desk& d) { return d.fxUsable(); }), "AUX 2 free: the effect is available");
+            const int aux2 = jack (td, "AUX 2");
+            check (session.connect (td, aux2, mx, jack (mx, "5 L")), "a cable in AUX 2");
+            check (! desk->getEngine().withDesk ([] (trackdesk::Desk& d) { return d.fxUsable(); }), "and the effect is N/A, as on the original");
+            session.disconnect (session.findCable (td, aux2));
+            juce::MemoryBlock m;
+            desk->getStateInformation (m);
+            trackdesk::TrackdeskProcessor fresh;
+            fresh.setStateInformation (m.getData(), (int) m.getSize());
+            const float fader = fresh.getEngine().withDesk ([] (trackdesk::Desk& d) { return d.strips[6].fader; });
+            check (std::abs (fader - trackdesk::law::kFaderUnity) < 1.0e-4f, "Trackdesk: the panel and settings");
+        }
+    }
+
     lines->add ("-- the table survives saving and opening");
     {
         const auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("tabletop-selftest.tabletop");
@@ -529,7 +568,7 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
             speakers = std::max (iface->peaks[0].load(), iface->peaks[1].load());
         if (auto* mixer = dynamic_cast<MixerProcessor*> (session.getProcessor (find ("mixer"))))
             channel1 = mixer->channels[0].peak.load();
-        check (channel1 > 0.01f, "mixer channel 1 hears the Valvebox (" + juce::String (channel1, 3) + ")");
+        check (channel1 > 0.01f, "mixer channel 1 hears the Valvebox through Trackdesk (" + juce::String (channel1, 3) + ")");
         check (speakers > 0.01f, "the speakers hear the mix (" + juce::String (speakers, 3) + ")");
         if (auto* p = dynamic_cast<valvebox::ValveboxProcessor*> (session.getProcessor (vbNow)))
             p->getEngine().withMachine ([] (valvebox::Machine& m) {
@@ -544,8 +583,9 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
             table.backToTable();
             check (n != nullptr && ! n->isLive() && ! table.isFocused(), "back to the table");
             const auto cables = session.getCables().size();
+            const auto devices = session.getDevices().size();
             table.removeDevice (find ("padlab"));
-            check (session.getDevices().size() == 4 && session.getCables().size() == cables - 2 && table.getNodes().size() == 4,
+            check (session.getDevices().size() == devices - 1 && session.getCables().size() == cables - 2 && table.getNodes().size() == devices - 1,
                    "taking Padlab off the table takes its cables with it");
             lines->add ("");
             lines->add (*failures == 0 ? juce::String ("ALL PASSED") : juce::String (*failures) + " FAILED");

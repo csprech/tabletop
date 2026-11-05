@@ -2,6 +2,7 @@
 #include "BuiltIn.h"
 #include "fourpole/src/plugin/FourpoleProcessor.h"
 #include "padlab/src/plugin/PadlabProcessor.h"
+#include "trackdesk/src/plugin/TrackdeskProcessor.h"
 #include "valvebox/src/plugin/ValveboxProcessor.h"
 
 namespace tabletop
@@ -55,6 +56,37 @@ namespace
             d.rear = juce::Colour (0xff2a2622);
             d.jacks = { { "MIDI IN", K::MidiIn }, { "EXT IN", K::AudioIn, 0 }, { "OUTPUT", K::AudioOut, 0 } };
             d.create = [] { return std::make_unique<fourpole::FourpoleProcessor>(); };
+            t.push_back (d);
+        }
+        {
+            DeviceType d;
+            d.id = "trackdesk";
+            d.name = "Trackdesk TD-12";
+            d.blurb = "12-track recording console: 10 inputs, effects, recorder";
+            d.widthMm = 343.0f;
+            d.panelWidth = trackdesk::TrackdeskProcessor::kPanelWidth;
+            d.panelHeight = trackdesk::TrackdeskProcessor::kPanelHeight;
+            d.depthMm = d.widthMm * (float) d.panelHeight / (float) d.panelWidth;
+            d.rear = juce::Colour (0xff1e1f22);
+            // the back panel's order, seen from above: the inputs, MIDI and CLICK, the outputs, the computer
+            const char* inputs[] = { "IN 1", "IN 2", "IN 3", "IN 4", "IN 5", "IN 6", "7/8 L", "7/8 R", "9/10 L", "9/10 R" };
+            for (int c = 0; c < 10; ++c)
+                d.jacks.push_back ({ inputs[c], K::AudioIn, c });
+            d.jacks.push_back ({ "MIDI OUT", K::MidiOut });
+            d.jacks.push_back ({ "CLICK", K::AudioOut, 10 });
+            d.jacks.push_back ({ "AUX 1", K::AudioOut, 4 });
+            d.jacks.push_back ({ "AUX 2", K::AudioOut, 5 });
+            d.jacks.push_back ({ "SUB L", K::AudioOut, 2 });
+            d.jacks.push_back ({ "SUB R", K::AudioOut, 3 });
+            d.jacks.push_back ({ "MAIN L", K::AudioOut, 0 });
+            d.jacks.push_back ({ "MAIN R", K::AudioOut, 1 });
+            d.jacks.push_back ({ "USB L", K::AudioIn, 10 });
+            d.jacks.push_back ({ "USB R", K::AudioIn, 11 });
+            d.jacks.push_back ({ "PHONES 1 L", K::AudioOut, 6 });
+            d.jacks.push_back ({ "PHONES 1 R", K::AudioOut, 7 });
+            d.jacks.push_back ({ "PHONES 2 L", K::AudioOut, 8 });
+            d.jacks.push_back ({ "PHONES 2 R", K::AudioOut, 9 });
+            d.create = [] { return std::make_unique<trackdesk::TrackdeskProcessor>(); };
             t.push_back (d);
         }
         {
