@@ -1,5 +1,7 @@
 # Tabletop
 
+> **This is the `gpui` branch:** the table drawn with a [GPUI](https://gpui.rs) front end (experimental). [`gpui/README.md`](gpui/README.md) explains how it's built, run and tested. The JUCE app described below still builds from this branch. [`main`](https://github.com/csprech/tabletop/tree/main) keeps it unchanged.
+
 A studio on a table. The research instruments sit on an endless wooden table at life size, and you cable them together the way you would in a real studio:
 - [Fourpole](https://github.com/csprech/fourpole), a three-oscillator monosynth;
 - [Valvebox](https://github.com/csprech/valvebox), a groovebox;
@@ -98,7 +100,7 @@ Its tapes, mixdowns and snapshots are saved in the same folder as the Keytape ap
 
 ## How it works
 
-- **The audio graph:** each device on the table is a node in one JUCE `AudioProcessorGraph`, and each cable is a connection in it, audio or MIDI. The audio interface's jacks are joined to the graph's links to the computer's audio device and MIDI inputs.
+- **The audio graph:** each device on the table is a node in one JUCE `AudioProcessorGraph`, and each cable is a connection in it, audio or MIDI. The cables from the audio interface's IN and MIDI jacks come straight from the graph's links to the computer's audio input and MIDI inputs, so a device whose sound comes back to the speakers isn't in a loop (a loop would feed it silence). The computer's default input opens when an IN jack is first cabled, and the device chosen in Audio/MIDI is remembered.
 - **The devices:** each repository publishes a `<device>-module.cmake` listing its sources, and a processor wrapper in `src/plugin/`. The wrapper uses the same engine and panel as the device's own app, in a hosted mode that opens no audio device and takes its audio and MIDI from the graph. Tabletop compiles those sources into its own target.
 - **Real size:** the table works in millimetres. Each device's panel is scaled to the device's real width, so they sit at their true sizes relative to each other.
 - **Panel pictures:** zoomed out, the devices show pictures of their panels, refreshed a few times a second at a resolution that suits the zoom. That keeps panning and zooming smooth. The device you zoom in on gets its live panel.
