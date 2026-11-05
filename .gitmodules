@@ -1,0 +1,9 @@
+[submodule "devices/fourpole"]
+	path = devices/fourpole
+	url = https://github.com/csprech/fourpole.git
+[submodule "devices/valvebox"]
+	path = devices/valvebox
+	url = https://github.com/csprech/valvebox.git
+[submodule "devices/padlab"]
+	path = devices/padlab
+	url = https://github.com/csprech/padlab.git

@@ -1,0 +1,5 @@
+build/
+build-release/
+external/
+*.tabletop
+.DS_Store
