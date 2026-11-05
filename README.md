@@ -1,5 +1,7 @@
 # Tabletop
 
+> **This is the `experiment/opengl-bench` branch:** the JUCE table with a frame-rate benchmark and an OpenGL switch, kept for reference. See [Measuring the frame rate](#measuring-the-frame-rate) below. [`main`](https://github.com/csprech/tabletop/tree/main) is the app without them.
+
 A studio on a table. The research instruments sit on an endless wooden table at life size, and you cable them together the way you would in a real studio:
 - [Fourpole](https://github.com/csprech/fourpole), a three-oscillator monosynth;
 - [Valvebox](https://github.com/csprech/valvebox), a groovebox;
@@ -140,3 +142,25 @@ Other testing aids:
 - `TABLETOP_RENDER_SHELF=assets/shelf` renders the shelf's pictures again from the devices' real panels, then quits. Do this after a device's look changes, and commit the PNG files. They're built into the app.
 
 Each device's own tests live in its repository.
+
+## Measuring the frame rate
+
+This branch adds two testing aids to the JUCE table:
+- **`TABLETOP_BENCH=/tmp/bench.txt`:** flies in to every device and back, and zooms with the wheel for a second. It reports the frames per second the table actually painted during each move, and the longest gap between frames.
+- **`TABLETOP_OPENGL=1`:** draws the window through JUCE's OpenGL renderer instead of CoreGraphics.
+
+```sh
+TABLETOP_NO_AUTOSAVE=1 TABLETOP_OPEN=/path/to/table.tabletop TABLETOP_BENCH=/tmp/bench.txt \
+    build/Tabletop_artefacts/Release/Tabletop.app/Contents/MacOS/Tabletop
+```
+
+These were measured on a Mac mini (1920 x 1080), Release build, on a table with all seven devices:
+
+| | overall | longest gap |
+|---|---|---|
+| CoreGraphics | 19.0 fps | 94 ms |
+| OpenGL | 19.2 fps | 97 ms |
+
+OpenGL didn't help: the time goes into drawing the devices' panels, not into putting pixels on screen. So it stays off.
+
+The [`gpui` branch](https://github.com/csprech/tabletop/tree/gpui) has the same benchmark for the GPUI table, which comes out at 49.5 fps.
