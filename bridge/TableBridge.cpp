@@ -12,6 +12,7 @@
 #include "trackdesk/src/ui/Panel.h"
 #include "valvebox/src/plugin/ValveboxProcessor.h"
 #include "valvebox/src/ui/MainComponent.h"
+#include "valvebox/src/ui/Widgets.h"
 #include <set>
 
 namespace tabletop
@@ -53,101 +54,91 @@ namespace
         return juce::ModifierKeys (f);
     }
 
-    /** The mouse and keyboard sent into a component tree that isn't on screen (a device's panel). */
+    /** A window that isn't one: the peer JUCE gives a device's panel. It never draws (GPUI shows the panel), but it
+        sits where the panel is on screen, so JUCE delivers the mouse the normal way (with mouse listeners, hover,
+        double-clicks and buttons as on screen) and opens menus and pop-ups over the panel, at its size. */
+    struct HeadlessPeer final : juce::ComponentPeer
+    {
+        HeadlessPeer (juce::Component& c, int flags, const bool& focusedFlag) : juce::ComponentPeer (c, flags), focused (focusedFlag) {}
+        const bool& focused;
+        juce::Rectangle<int> bounds;
+
+        void* getNativeHandle() const override { return nullptr; }
+        void setVisible (bool) override {}
+        void setTitle (const juce::String&) override {}
+        void setBounds (const juce::Rectangle<int>& r, bool) override { bounds = r; }
+        juce::Rectangle<int> getBounds() const override { return bounds; }
+        juce::Point<float> localToGlobal (juce::Point<float> p) override { return p + bounds.getPosition().toFloat(); }
+        juce::Point<float> globalToLocal (juce::Point<float> p) override { return p - bounds.getPosition().toFloat(); }
+        void setMinimised (bool) override {}
+        bool isMinimised() const override { return false; }
+        bool isShowing() const override { return true; }
+        void setFullScreen (bool) override {}
+        bool isFullScreen() const override { return false; }
+        void setIcon (const juce::Image&) override {}
+        bool contains (juce::Point<int> p, bool) const override { return bounds.withZeroOrigin().contains (p); }
+        OptionalBorderSize getFrameSizeIfPresent() const override { return {}; }
+        juce::BorderSize<int> getFrameSize() const override { return {}; }
+        bool setAlwaysOnTop (bool) override { return true; }
+        void toFront (bool) override {}
+        void toBehind (juce::ComponentPeer*) override {}
+        bool isFocused() const override { return focused; }
+        void grabFocus() override {}
+        void repaint (const juce::Rectangle<int>&) override {}
+        void performAnyPendingRepaintsNow() override {}
+        void setAlpha (float) override {}
+        juce::StringArray getAvailableRenderingEngines() override { return { "Software Renderer" }; }
+        void textInputRequired (juce::Point<int>, juce::TextInputTarget&) override {}
+    };
+
+    /** What holds a device's panel on the (pretend) desktop: in screen points, with the panel scaled into it. */
+    struct Mount final : juce::Component
+    {
+        bool focused = false;
+        juce::Point<float> origin;
+        float scale = 1.0f;
+
+        Mount() { setAccessible (false); }
+        juce::ComponentPeer* createNewPeer (int flags, void*) override { return new HeadlessPeer (*this, flags, focused); }
+    };
+
+    /** The mouse sent into a panel through its peer (so JUCE handles it as if it were on screen). */
     struct Forwarder
     {
-        juce::Component::SafePointer<juce::Component> target;
-        juce::Point<float> downPos;
-        juce::Time downTime;
-        bool dragged = false;
-        int clicks = 1;
         uint64_t inputs = 0;
+        bool buttonDown = false;
 
-        static juce::Button* buttonOf (juce::Component* c)
+        static juce::Point<float> toPeer (Mount& m, juce::Component& panel, juce::Point<float> p) { return m.getLocalPoint (&panel, p); }
+
+        void mouse (Mount& m, juce::Component& panel, int kind, juce::Point<float> p, int bits)
         {
-            for (; c != nullptr; c = c->getParentComponent())
-                if (auto* b = dynamic_cast<juce::Button*> (c))
-                    return b;
-            return nullptr;
+            if (kind <= 2)
+                ++inputs; // (hovering doesn't redraw the panel by itself: the steady tick does)
+            auto* peer = m.getPeer();
+            if (peer == nullptr)
+                return;
+            // kind: 0 down, 1 drag, 2 up, 3 moved (no button), 4 left the panel
+            buttonDown = kind == 0 || (kind == 1 && buttonDown);
+            juce::ModifierKeys::currentModifiers = modsFrom (bits, buttonDown);
+            const auto pos = kind == 4 ? juce::Point<float> (-100000.0f, -100000.0f) : toPeer (m, panel, p);
+            peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::mouse, pos, juce::ModifierKeys::currentModifiers,
+                                    juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation, juce::Time::currentTimeMillis());
         }
 
-        juce::MouseEvent eventFor (juce::Component& root, juce::Component& c, juce::Point<float> p, int bits, bool button)
-        {
-            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), c.getLocalPoint (&root, p), modsFrom (bits, button),
-                                     juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, juce::Time::getCurrentTime(),
-                                     c.getLocalPoint (&root, downPos), downTime, clicks, dragged);
-        }
-
-        void mouse (juce::Component& root, int kind, juce::Point<float> p, int bits, int numClicks)
+        void wheel (Mount& m, juce::Component& panel, juce::Point<float> p, float dx, float dy, int bits)
         {
             ++inputs;
-            if (kind == 0)
-            {
-                auto* c = root.getComponentAt (p.roundToInt());
-                target = c != nullptr ? c : &root;
-                downPos = p;
-                downTime = juce::Time::getCurrentTime();
-                dragged = false;
-                clicks = std::max (1, numClicks);
-                if (auto* t = target.getComponent())
-                {
-                    // (a button only presses on screen, which this panel isn't: press it directly, and click it on release)
-                    if (auto* b = buttonOf (t))
-                    {
-                        target = b;
-                        if (b->isEnabled())
-                            b->setState (juce::Button::buttonDown);
-                        return;
-                    }
-                    const auto e = eventFor (root, *t, p, bits, true);
-                    t->mouseDown (e);
-                    if (clicks == 2 && target != nullptr)
-                        t->mouseDoubleClick (e);
-                }
+            auto* peer = m.getPeer();
+            if (peer == nullptr)
                 return;
-            }
-            auto* t = target.getComponent();
-            if (t == nullptr)
-                return;
-            if (auto* b = dynamic_cast<juce::Button*> (t))
-            {
-                const bool over = b->getLocalBounds().contains (b->getLocalPoint (&root, p).roundToInt());
-                if (kind == 1)
-                    b->setState (over ? juce::Button::buttonDown : juce::Button::buttonNormal);
-                else
-                {
-                    const bool wasDown = b->isDown();
-                    b->setState (juce::Button::buttonNormal);
-                    if (wasDown && over)
-                        b->triggerClick();
-                    target = nullptr;
-                }
-                return;
-            }
-            if (kind == 1)
-            {
-                dragged = dragged || p.getDistanceFrom (downPos) > 2.0f;
-                t->mouseDrag (eventFor (root, *t, p, bits, true));
-                return;
-            }
-            t->mouseUp (eventFor (root, *t, p, bits, false));
-            target = nullptr;
-        }
-
-        void wheel (juce::Component& root, juce::Point<float> p, float dx, float dy, int bits)
-        {
-            ++inputs;
-            auto* c = root.getComponentAt (p.roundToInt());
-            if (c == nullptr)
-                c = &root;
+            juce::ModifierKeys::currentModifiers = modsFrom (bits, buttonDown);
             juce::MouseWheelDetails d;
             d.deltaX = dx;
             d.deltaY = dy;
             d.isReversed = false;
             d.isSmooth = true;
             d.isInertial = false;
-            downPos = p;
-            c->mouseWheelMove (eventFor (root, *c, p, bits, false), d);
+            peer->handleMouseWheel (juce::MouseInputSource::InputSourceType::mouse, toPeer (m, panel, p), juce::Time::currentTimeMillis(), d);
         }
     };
 
@@ -174,7 +165,10 @@ struct Bridge
     std::unique_ptr<juce::ScopedJuceInitialiser_GUI> juce = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
     Session session;
     std::map<juce::String, std::unique_ptr<juce::AudioProcessorEditor>> editors;
+    std::map<juce::String, std::unique_ptr<Mount>> mounts;
     std::map<juce::String, Forwarder> forwarders;
+    juce::String focusedUid;
+    juce::Point<float> windowOrigin, originFix; // (the GPUI window's content as GPUI says, and the correction to JUCE's screen)
     uint64_t revision = 1;
     std::string typesJson, sessionJson, lastUid;
     juce::var camera;
@@ -224,10 +218,17 @@ struct Bridge
         auto it = editors.find (uid);
         if (it == editors.end())
             return;
+        if (auto m = mounts.find (uid); m != mounts.end())
+        {
+            m->second->removeChildComponent (it->second.get());
+            mounts.erase (m);
+        }
         if (auto* p = session.getProcessor (uid))
             p->editorBeingDeleted (it->second.get());
         editors.erase (it);
         forwarders.erase (uid);
+        if (focusedUid == uid)
+            focusedUid = {};
     }
 
     void dropEditors()
@@ -252,8 +253,13 @@ struct Bridge
                 if (auto* p = session.getProcessor (d.uid))
                     if (auto* e = p->createEditorAndMakeActive())
                     {
-                        e->setVisible (true); // (for hit-testing: it isn't on the desktop, so nothing shows)
                         editors[d.uid].reset (e);
+                        auto m = std::make_unique<Mount>();
+                        m->setSize (e->getWidth(), e->getHeight());
+                        m->addAndMakeVisible (e);
+                        m->setVisible (true);
+                        m->addToDesktop (0); // (a peer that never draws: see HeadlessPeer)
+                        mounts[d.uid] = std::move (m);
                     }
     }
 
@@ -261,6 +267,114 @@ struct Bridge
     {
         auto it = editors.find (juce::String::fromUTF8 (uid));
         return it != editors.end() ? it->second.get() : nullptr;
+    }
+
+    Mount* mount (const char* uid)
+    {
+        auto it = mounts.find (juce::String::fromUTF8 (uid));
+        return it != mounts.end() ? it->second.get() : nullptr;
+    }
+
+    /** Where the device's panel is in the window now (its top left, in window points, and points per panel pixel). */
+    void place (const char* uid, float x, float y, float scale)
+    {
+        auto* m = mount (uid);
+        auto* e = editor (uid);
+        if (m == nullptr || e == nullptr || scale <= 0.0f)
+            return;
+        const auto origin = windowOrigin + originFix + juce::Point<float> (x, y);
+        if (origin == m->origin && scale == m->scale)
+            return;
+        m->origin = origin;
+        m->scale = scale;
+        // (whole points for the peer; the fraction goes into the panel's transform)
+        const auto topLeft = origin.toInt();
+        const auto frac = origin - topLeft.toFloat();
+        e->setTransform (juce::AffineTransform::scale (scale).translated (frac));
+        m->setBounds (topLeft.x, topLeft.y, (int) std::ceil ((float) e->getWidth() * scale + 1.0f), (int) std::ceil ((float) e->getHeight() * scale + 1.0f));
+    }
+
+    void setFocused (const char* uid)
+    {
+        const auto u = juce::String::fromUTF8 (uid);
+        if (u == focusedUid)
+            return;
+        if (auto* old = mount (focusedUid.toRawUTF8()))
+        {
+            if (auto* e = editor (focusedUid.toRawUTF8()))
+                forwarders[focusedUid].mouse (*old, *e, 4, {}, 0); // (the mouse leaves it)
+            old->focused = false;
+        }
+        juce::PopupMenu::dismissAllActiveMenus();
+        focusedUid = u;
+        if (auto* m = mount (uid))
+            m->focused = true;
+    }
+
+    // ---------------------------------------------------------------- tooltips
+
+    /** The caption that names a part: a label just above or below it (as on the devices' screens and knobs). */
+    static juce::String captionFor (juce::Component& c)
+    {
+        auto* parent = c.getParentComponent();
+        if (parent == nullptr)
+            return {};
+        const auto b = c.getBounds();
+        juce::String best;
+        int bestGap = 15; // (only a caption right against it)
+        for (auto* sib : parent->getChildren())
+            if (auto* l = dynamic_cast<juce::Label*> (sib); l != nullptr && sib != &c && l->isVisible() && l->getText().trim().isNotEmpty())
+            {
+                const auto lb = l->getBounds();
+                if (lb.getRight() <= b.getX() || lb.getX() >= b.getRight())
+                    continue;
+                const int gap = lb.getBottom() <= b.getCentreY() ? b.getY() - lb.getBottom() : lb.getY() - b.getBottom();
+                if (gap >= -4 && gap < bestGap)
+                {
+                    bestGap = gap;
+                    best = l->getText().trim();
+                }
+            }
+        return best;
+    }
+
+    static juce::String describe (juce::Component& c)
+    {
+        if (auto* tc = dynamic_cast<juce::TooltipClient*> (&c))
+            if (auto t = tc->getTooltip(); t.isNotEmpty())
+                return t;
+        auto name = c.getName().replace ("\n", " ").trim();
+        if (name.isEmpty())
+            name = c.getTitle().trim();
+        if (auto* k = dynamic_cast<valvebox::ui::KnobWidget*> (&c); k != nullptr && name.isEmpty())
+            name = k->getLabel();
+        if (name.isEmpty())
+            name = captionFor (c);
+        if (auto* sl = dynamic_cast<juce::Slider*> (&c))
+        {
+            const auto v = sl->getTextFromValue (sl->getValue()).trim();
+            return name.isNotEmpty() ? name + ": " + v : v;
+        }
+        if (auto* cb = dynamic_cast<juce::ComboBox*> (&c))
+            return (name.isNotEmpty() ? name + ": " : juce::String()) + cb->getText() + "  (click to choose)";
+        if (auto* bt = dynamic_cast<juce::Button*> (&c); bt != nullptr && name.isEmpty())
+            name = bt->getButtonText().trim();
+        return name;
+    }
+
+    std::string tip;
+
+    const char* tooltip (const char* uid, juce::Point<float> p)
+    {
+        tip.clear();
+        if (auto* e = editor (uid))
+            for (auto* c = e->getComponentAt (p.roundToInt()); c != nullptr && c != e; c = c->getParentComponent())
+                if (auto t = describe (*c); t.isNotEmpty())
+                {
+                    tip = t.toStdString();
+                    break;
+                }
+        return tip.c_str();
     }
 
     int renderDevice (const char* uid, float scale, uint8_t* bgra, int w, int h)
@@ -332,7 +446,9 @@ struct Bridge
         const juce::juce_wchar ch = typed.isNotEmpty() ? typed[0] : (name.length() == 1 ? name[0] : 0);
         const int code = keyCodeFor (name, ch);
         const int heldKey = name.length() == 1 ? (int) juce::CharacterFunctions::toLowerCase (name[0]) : code;
-        auto* target = keyTargetIn (*e);
+        auto* target = juce::Component::getCurrentlyFocusedComponent();
+        if (target == nullptr || ! e->isParentOf (target))
+            target = keyTargetIn (*e);
         if (target == nullptr)
             target = e;
         bool handled = false;
@@ -478,6 +594,177 @@ struct Bridge
         o.launchAsync();
     }
 
+
+    // ---------------------------------------------------------------- the probe (diagnostics: which parts answer the mouse)
+
+    static uint64_t stateHash (juce::AudioProcessor& p)
+    {
+        juce::MemoryBlock mb;
+        p.getStateInformation (mb);
+        return (uint64_t) juce::String::toHexString (mb.getData(), (int) mb.getSize(), 0).hashCode64();
+    }
+
+    static void collect (juce::Component& c, std::vector<juce::Component*>& out)
+    {
+        for (auto* child : c.getChildren())
+            if (child->isVisible() && child->getWidth() > 2 && child->getHeight() > 2)
+            {
+                out.push_back (child);
+                collect (*child, out);
+            }
+    }
+
+    static uint64_t pixels (juce::Component& c)
+    {
+        juce::Image img (juce::Image::ARGB, std::max (1, c.getWidth()), std::max (1, c.getHeight()), true, juce::SoftwareImageType());
+        {
+            juce::Graphics g (img);
+            c.paintEntireComponent (g, true);
+        }
+        const juce::Image::BitmapData bd (img, juce::Image::BitmapData::readOnly);
+        uint64_t h = 1469598103934665603ull;
+        for (int y = 0; y < img.getHeight(); y += 2)
+            h = mix (h, (uint64_t) juce::String::toHexString (bd.getLinePointer (y), img.getWidth() * 4, 0).hashCode64());
+        return h;
+    }
+
+    struct Probe : juce::Timer
+    {
+        struct Item { juce::String uid, type; juce::Component::SafePointer<juce::Component> c; juce::Point<float> at; juce::String what; };
+        Bridge& b;
+        juce::String path;
+        std::vector<Item> items;
+        size_t i = 0;
+        int phase = 0;
+        juce::MemoryBlock before;
+        uint64_t s0 = 0, p0 = 0, pDown = 0, sClick = 0, p1 = 0, s1 = 0, pDrag = 0, pDrag2 = 0;
+        bool opened = false; // (a menu or a window came up)
+
+        void closeWindows()
+        {
+            juce::PopupMenu::dismissAllActiveMenus();
+            if (auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating())
+            {
+                opened = opened || mcm->getNumModalComponents() > 0;
+                mcm->cancelAllModalComponents();
+            }
+        }
+        juce::StringArray lines;
+        std::map<juce::String, std::pair<int, int>> counts;
+        bool done = false;
+
+        Probe (Bridge& br, const char* p) : b (br), path (juce::String::fromUTF8 (p))
+        {
+            const auto only = juce::SystemStats::getEnvironmentVariable ("TABLETOP_PROBE_ONLY", {});
+            for (auto& d : b.session.getDevices())
+                if (auto* e = b.editor (d.uid.toRawUTF8()); e != nullptr && (only.isEmpty() || only == d.type->id))
+                {
+                    std::vector<juce::Component*> all;
+                    collect (*e, all);
+                    std::set<juce::Component*> seen;
+                    for (auto* c : all)
+                    {
+                        const auto centre = e->getLocalArea (c, c->getLocalBounds()).toFloat().getCentre();
+                        if (e->getComponentAt (centre.roundToInt()) != c || ! seen.insert (c).second)
+                            continue;
+                        auto name = juce::String (typeid (*c).name());
+                        items.push_back ({ d.uid, d.type->id, c, centre,
+                                           "[" + describe (*c) + "] " + name + " '" + c->getName().replace ("\n", " ") + "' in " + juce::String (typeid (*c->getParentComponent()).name()) + " at "
+                                               + centre.toInt().toString() });
+                    }
+                }
+            startTimer (45);
+        }
+
+        juce::AudioProcessor* proc() { return b.session.getProcessor (items[i].uid); }
+        juce::Component* ed() { return b.editor (items[i].uid.toRawUTF8()); }
+
+        void timerCallback() override
+        {
+            if (i >= items.size())
+            {
+                stopTimer();
+                for (auto& [t, c] : counts)
+                    lines.add ("-- " + t + ": " + juce::String (c.first) + " answer, " + juce::String (c.second) + " don't");
+                juce::File (path).replaceWithText (lines.joinIntoString ("\n") + "\n");
+                done = true;
+                return;
+            }
+            auto& it = items[i];
+            auto* p = proc();
+            auto* e = ed();
+            auto* c = it.c.getComponent();
+            if (p == nullptr || e == nullptr || c == nullptr)
+            {
+                ++i;
+                phase = 0;
+                return;
+            }
+            auto& fw = b.forwarders[it.uid];
+            auto* m = b.mount (it.uid.toRawUTF8());
+            if (m == nullptr)
+            {
+                ++i;
+                phase = 0;
+                return;
+            }
+            switch (phase++)
+            {
+                case 0:
+                    p->getStateInformation (before);
+                    s0 = stateHash (*p);
+                    p0 = pixels (*c);
+                    fw.mouse (*m, *e, 0, it.at, 0);
+                    break;
+                case 1:
+                    pDown = pixels (*c);
+                    fw.mouse (*m, *e, 2, it.at, 0);
+                    break;
+                case 2: break;
+                case 3:
+                    sClick = stateHash (*p);
+                    p->setStateInformation (before.getData(), (int) before.getSize());
+                    closeWindows();
+                    break;
+                case 4: closeWindows(); break;
+                case 5:
+                    s1 = stateHash (*p);
+                    p1 = pixels (*c);
+                    fw.mouse (*m, *e, 0, it.at, 0);
+                    for (int k = 1; k <= 6; ++k)
+                        fw.mouse (*m, *e, 1, it.at.translated (0.0f, -10.0f * (float) k), 0);
+                    break;
+                case 6:
+                    pDrag = pixels (*c);
+                    for (int k = 1; k <= 12; ++k) // (and back down past where it started: a knob at its top only goes down)
+                        fw.mouse (*m, *e, 1, it.at.translated (0.0f, -60.0f + 10.0f * (float) k), 0);
+                    break;
+                case 7:
+                    pDrag2 = pixels (*c);
+                    fw.mouse (*m, *e, 2, it.at.translated (0.0f, 60.0f), 0);
+                    break;
+                case 8: break;
+                case 9: closeWindows(); break;
+                default:
+                {
+                    const bool click = pDown != p0 || sClick != s0 || opened, drag = pDrag != p1 || pDrag2 != p1 || stateHash (*p) != s1;
+                    p->setStateInformation (before.getData(), (int) before.getSize());
+                    closeWindows();
+                    opened = false;
+                    auto& n = counts[it.type];
+                    (click || drag ? n.first : n.second)++;
+                    lines.add (it.type.paddedRight (' ', 10) + (click || drag ? juce::String ("ok   ") + (click ? "click " : "      ") + (drag ? "drag  " : "      ") : "DEAD              ") + it.what);
+                    ++i;
+                    phase = 0;
+                }
+            }
+        }
+    };
+    std::unique_ptr<Probe> probing;
+
+    void probe (const char* path) { probing = std::make_unique<Probe> (*this, path); }
+    bool probeDone() const { return probing != nullptr && probing->done; }
+
     // ---------------------------------------------------------------- the self-test's ears
 
     template <typename P>
@@ -552,15 +839,45 @@ int tt_connect (TtTable* t, const char* a, int aj, const char* b, int bj) { retu
 int tt_find_cable (TtTable* t, const char* uid, int jack) { return t->b.session.findCable (juce::String::fromUTF8 (uid), jack); }
 void tt_disconnect (TtTable* t, int index) { t->b.session.disconnect (index); }
 
-void tt_device_mouse (TtTable* t, const char* uid, int kind, float x, float y, int mods, int clicks)
+void tt_device_mouse (TtTable* t, const char* uid, int kind, float x, float y, int mods, int)
 {
-    if (auto* e = t->b.editor (uid))
-        t->b.forwarders[juce::String::fromUTF8 (uid)].mouse (*e, kind, { x, y }, mods, clicks);
+    auto* e = t->b.editor (uid);
+    auto* m = t->b.mount (uid);
+    if (e != nullptr && m != nullptr)
+        t->b.forwarders[juce::String::fromUTF8 (uid)].mouse (*m, *e, kind, { x, y }, mods);
 }
 void tt_device_wheel (TtTable* t, const char* uid, float x, float y, float dx, float dy, int mods)
 {
-    if (auto* e = t->b.editor (uid))
-        t->b.forwarders[juce::String::fromUTF8 (uid)].wheel (*e, { x, y }, dx, dy, mods);
+    auto* e = t->b.editor (uid);
+    auto* m = t->b.mount (uid);
+    if (e != nullptr && m != nullptr)
+        t->b.forwarders[juce::String::fromUTF8 (uid)].wheel (*m, *e, { x, y }, dx, dy, mods);
+}
+void tt_window_origin (TtTable* t, float x, float y) { t->b.windowOrigin = { x, y }; }
+void tt_window_origin_from_pointer (TtTable* t, float x, float y)
+{
+    // (from a real mouse event: where the pointer is on screen, less where it is in the window; GPUI's own idea of the
+    // window's position is only right on the main display)
+    t->b.originFix = juce::Desktop::getInstance().getMainMouseSource().getRawScreenPosition() - juce::Point<float> (x, y) - t->b.windowOrigin;
+}
+void tt_place_device (TtTable* t, const char* uid, float x, float y, float scale) { t->b.place (uid, x, y, scale); }
+void tt_set_focused (TtTable* t, const char* uid) { t->b.setFocused (uid); }
+const char* tt_device_tooltip (TtTable* t, const char* uid, float x, float y) { return t->b.tooltip (uid, { x, y }); }
+int tt_menu_check (TtTable* t, const char* uid)
+{
+    // (the self-test) 0: nothing open; 1: a menu or window is open over the device's panel; 2: open somewhere else
+    auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating();
+    auto* m = t->b.mount (uid);
+    if (mcm == nullptr || mcm->getNumModalComponents() == 0 || m == nullptr)
+        return 0;
+    auto* c = mcm->getModalComponent (0);
+    return m->getScreenBounds().intersects (c->getScreenBounds()) ? 1 : 2;
+}
+void tt_close_menus (TtTable*)
+{
+    juce::PopupMenu::dismissAllActiveMenus();
+    if (auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating())
+        mcm->cancelAllModalComponents();
 }
 int tt_device_key (TtTable* t, const char* uid, const char* key, const char* chars, int down, int mods) { return t->b.key (uid, key, chars, down != 0, mods); }
 void tt_device_modifiers (TtTable* t, const char* uid, int mods) { t->b.modifiers (uid, mods); }
@@ -612,4 +929,6 @@ void tt_test_sound (TtTable* t, int start)
         });
 }
 int tt_device_count (TtTable* t) { return (int) t->b.session.getDevices().size(); }
+void tt_probe (TtTable* t, const char* path) { t->b.probe (path); }
+int tt_probe_done (TtTable* t) { return t->b.probeDone() ? 1 : 0; }
 }

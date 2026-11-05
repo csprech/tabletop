@@ -43,12 +43,22 @@ int tt_connect (TtTable*, const char* a, int aJack, const char* b, int bJack);
 int tt_find_cable (TtTable*, const char* uid, int jack);
 void tt_disconnect (TtTable*, int index);
 
-/* Playing a device: the mouse (kind 0 down, 1 drag, 2 up; mods 1 shift, 2 command, 4 option, 8 control) and the
-   computer keyboard, in its panel's coordinates. */
+/* Playing a device: the mouse (kind 0 down, 1 drag, 2 up, 3 moved with no button, 4 left the panel; mods 1 shift,
+   2 command, 4 option, 8 control) and the computer keyboard, in its panel's coordinates. */
 void tt_device_mouse (TtTable*, const char* uid, int kind, float x, float y, int mods, int clicks);
 void tt_device_wheel (TtTable*, const char* uid, float x, float y, float dx, float dy, int mods);
 int tt_device_key (TtTable*, const char* uid, const char* key, const char* chars, int down, int mods);
 void tt_device_modifiers (TtTable*, const char* uid, int mods);
+
+/* Where things are on screen, so JUCE opens a panel's menus and pop-ups over it: the window's content (its top left
+   in screen points; or worked out from a real mouse event at x, y in the window), the device being played (its
+   panel's top left in the window, and window points per panel pixel), and which device that is ("" for none). */
+void tt_window_origin (TtTable*, float x, float y);
+void tt_window_origin_from_pointer (TtTable*, float x, float y);
+void tt_place_device (TtTable*, const char* uid, float x, float y, float scale);
+void tt_set_focused (TtTable*, const char* uid);
+/* What the part of a panel under x, y (its pixels) is, for a tooltip ("" if nothing says). */
+const char* tt_device_tooltip (TtTable*, const char* uid, float x, float y);
 
 /* Tables: the first table, saving and opening (.tabletop, with the front end's camera), the autosave. */
 void tt_new_table (TtTable*);
@@ -63,6 +73,12 @@ float tt_speaker_level (TtTable*);
 float tt_mixer_channel_level (TtTable*, int channel);
 void tt_test_sound (TtTable*, int start);
 int tt_device_count (TtTable*);
+/* 0: no menu or window open; 1: one is open over the device's panel; 2: one is open elsewhere. And closing them. */
+int tt_menu_check (TtTable*, const char* uid);
+void tt_close_menus (TtTable*);
+/* Diagnostics: clicks and drags every part of every panel, and writes which ones change nothing. */
+void tt_probe (TtTable*, const char* path);
+int tt_probe_done (TtTable*);
 
 #ifdef __cplusplus
 }

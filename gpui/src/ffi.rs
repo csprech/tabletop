@@ -30,6 +30,11 @@ unsafe extern "C" {
     fn tt_device_wheel(t: *mut TtTable, uid: *const c_char, x: c_float, y: c_float, dx: c_float, dy: c_float, mods: c_int);
     fn tt_device_key(t: *mut TtTable, uid: *const c_char, key: *const c_char, chars: *const c_char, down: c_int, mods: c_int) -> c_int;
     fn tt_device_modifiers(t: *mut TtTable, uid: *const c_char, mods: c_int);
+    fn tt_window_origin(t: *mut TtTable, x: c_float, y: c_float);
+    fn tt_window_origin_from_pointer(t: *mut TtTable, x: c_float, y: c_float);
+    fn tt_place_device(t: *mut TtTable, uid: *const c_char, x: c_float, y: c_float, scale: c_float);
+    fn tt_set_focused(t: *mut TtTable, uid: *const c_char);
+    fn tt_device_tooltip(t: *mut TtTable, uid: *const c_char, x: c_float, y: c_float) -> *const c_char;
     fn tt_new_table(t: *mut TtTable);
     fn tt_autosave(t: *mut TtTable, camera: *const c_char);
     fn tt_show_audio_settings(t: *mut TtTable);
@@ -38,6 +43,10 @@ unsafe extern "C" {
     fn tt_mixer_channel_level(t: *mut TtTable, ch: c_int) -> c_float;
     fn tt_test_sound(t: *mut TtTable, start: c_int);
     fn tt_device_count(t: *mut TtTable) -> c_int;
+    fn tt_menu_check(t: *mut TtTable, uid: *const c_char) -> c_int;
+    fn tt_close_menus(t: *mut TtTable);
+    fn tt_probe(t: *mut TtTable, path: *const c_char);
+    fn tt_probe_done(t: *mut TtTable) -> c_int;
 }
 
 fn cs(s: &str) -> CString {
@@ -135,6 +144,24 @@ impl Table {
         let u = cs(uid);
         unsafe { tt_device_modifiers(self.0, u.as_ptr(), mods) }
     }
+    pub fn window_origin(&self, x: f32, y: f32) {
+        unsafe { tt_window_origin(self.0, x, y) }
+    }
+    pub fn window_origin_from_pointer(&self, x: f32, y: f32) {
+        unsafe { tt_window_origin_from_pointer(self.0, x, y) }
+    }
+    pub fn place_device(&self, uid: &str, x: f32, y: f32, scale: f32) {
+        let u = cs(uid);
+        unsafe { tt_place_device(self.0, u.as_ptr(), x, y, scale) }
+    }
+    pub fn set_focused(&self, uid: &str) {
+        let u = cs(uid);
+        unsafe { tt_set_focused(self.0, u.as_ptr()) }
+    }
+    pub fn device_tooltip(&self, uid: &str, x: f32, y: f32) -> String {
+        let u = cs(uid);
+        Self::string(unsafe { tt_device_tooltip(self.0, u.as_ptr(), x, y) })
+    }
     pub fn new_table(&self) {
         unsafe { tt_new_table(self.0) }
     }
@@ -159,6 +186,20 @@ impl Table {
     }
     pub fn device_count(&self) -> usize {
         unsafe { tt_device_count(self.0) as usize }
+    }
+    pub fn menu_check(&self, uid: &str) -> i32 {
+        let u = cs(uid);
+        unsafe { tt_menu_check(self.0, u.as_ptr()) }
+    }
+    pub fn close_menus(&self) {
+        unsafe { tt_close_menus(self.0) }
+    }
+    pub fn probe(&self, path: &str) {
+        let p = cs(path);
+        unsafe { tt_probe(self.0, p.as_ptr()) }
+    }
+    pub fn probe_done(&self) -> bool {
+        unsafe { tt_probe_done(self.0) != 0 }
     }
 }
 

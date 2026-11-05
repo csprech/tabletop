@@ -30,6 +30,8 @@ const CARD_H: f32 = 96.0;
 struct Jack {
     label: String,
     midi: bool,
+    #[serde(default)]
+    input: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -37,6 +39,8 @@ struct DeviceType {
     id: String,
     name: String,
     kind: String,
+    #[serde(default)]
+    blurb: String,
     #[serde(rename = "widthMm")]
     width_mm: f32,
     #[serde(rename = "depthMm")]
@@ -144,6 +148,14 @@ struct TableView {
     fitted: bool,
     last_save: Instant,
     frames: Option<Vec<Instant>>, // (the benchmark: when each frame was drawn)
+    retired: Vec<(u64, Arc<RenderImage>)>, // pictures replaced, to take out of the GPU's atlas (with the frame they went)
+    frame: u64,
+    dropped: usize, // (pictures let go of: the self-test checks they are)
+    bridge_focus: String, // (the device the bridge was last told is being played)
+    pointer: Option<(f32, f32)>, // where the mouse is in the window
+    pointer_still: Instant,       // since when it hasn't moved
+    in_panel: bool,               // (the mouse is over the played device's panel)
+    panel_tip: Option<(String, (f32, f32))>,
 }
 
 impl TableView {
@@ -176,6 +188,14 @@ impl TableView {
             fitted: false,
             last_save: Instant::now(),
             frames: None,
+            retired: Vec::new(),
+            frame: 0,
+            dropped: 0,
+            bridge_focus: String::new(),
+            pointer: None,
+            pointer_still: Instant::now(),
+            in_panel: false,
+            panel_tip: None,
         };
         this.reload();
         if let Some(c) = this.session.camera.as_object() {
@@ -205,6 +225,28 @@ impl TableView {
         if let Ok(report) = std::env::var("TABLETOP_GPUI_SELFTEST") {
             Self::self_test(report, cx);
         }
+        if let Ok(report) = std::env::var("TABLETOP_PROBE") {
+            cx.spawn(async move |this, cx| {
+                Timer::after(Duration::from_millis(1500)).await;
+                let _ = this.update(cx, |this, _| {
+                    // every kind of device on the table, then every part of every panel clicked and dragged
+                    let missing: Vec<String> = this.types.iter().filter(|t| !this.session.devices.iter().any(|d| d.type_id == t.id)).map(|t| t.id.clone()).collect();
+                    for (i, id) in missing.iter().enumerate() {
+                        this.table.add_device(id, 3000.0 + i as f32 * 900.0, 3000.0);
+                    }
+                    this.reload();
+                    this.table.probe(&report);
+                });
+                loop {
+                    Timer::after(Duration::from_millis(200)).await;
+                    if this.update(cx, |this, _| this.table.probe_done()).unwrap_or(true) {
+                        break;
+                    }
+                }
+                let _ = this.update(cx, |_, cx| cx.quit());
+            })
+            .detach();
+        }
         if let Ok(report) = std::env::var("TABLETOP_BENCH") {
             Self::benchmark(report, cx);
         }
@@ -221,7 +263,12 @@ impl TableView {
         }
         self.revision = self.table.revision();
         let alive: Vec<String> = self.session.devices.iter().map(|d| d.uid.clone()).collect();
-        self.sprites.retain(|uid, _| alive.contains(uid));
+        let gone: Vec<String> = self.sprites.keys().filter(|u| !alive.contains(u)).cloned().collect();
+        for uid in gone {
+            if let Some(s) = self.sprites.remove(&uid) {
+                self.retired.push((self.frame, s.image));
+            }
+        }
     }
 
     fn type_of(&self, id: &str) -> Option<&DeviceType> {
@@ -385,7 +432,10 @@ impl TableView {
         }
         let (w, h) = ((t.panel_w * scale).ceil() as usize, (t.panel_h * scale).ceil() as usize);
         let img = image(w.max(1), h.max(1), self.table.render_device(&d.uid, scale, w.max(1), h.max(1)));
-        self.sprites.insert(d.uid.clone(), Sprite { signature, scale, image: img.clone() });
+        // (GPUI keeps every picture it's shown in its atlas until told to let it go: the old one goes once it's off screen)
+        if let Some(old) = self.sprites.insert(d.uid.clone(), Sprite { signature, scale, image: img.clone() }) {
+            self.retired.push((self.frame, old.image));
+        }
         Some(img)
     }
 
@@ -443,6 +493,9 @@ impl TableView {
 
     fn mouse_down(&mut self, ev: &MouseDownEvent, cx: &mut Context<Self>) {
         let p = (f(ev.position.x), f(ev.position.y));
+        self.table.window_origin_from_pointer(p.0, p.1);
+        self.panel_tip = None;
+        self.pointer_still = Instant::now();
         if p.1 < BAR_H {
             return;
         }
@@ -506,6 +559,30 @@ impl TableView {
     fn mouse_move(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) {
         let p = (f(ev.position.x), f(ev.position.y));
         let mm = self.to_table(p);
+        if self.pointer != Some(p) {
+            self.pointer = Some(p);
+            self.pointer_still = Instant::now();
+            self.panel_tip = None;
+        }
+        if self.drag.is_none() {
+            // hovering: the played panel hears it (for its own hover and tooltips); everything waits for a tooltip
+            self.table.window_origin_from_pointer(p.0, p.1);
+            if let Some(uid) = self.focused.clone() {
+                match self.panel_point(&uid, p) {
+                    Some(pp) if p.1 > BAR_H => {
+                        self.table.device_mouse(&uid, 3, pp.0, pp.1, mods_of(&ev.modifiers), 0);
+                        self.in_panel = true;
+                    }
+                    _ if self.in_panel => {
+                        self.table.device_mouse(&uid, 4, 0.0, 0.0, 0, 0);
+                        self.in_panel = false;
+                    }
+                    _ => {}
+                }
+            }
+            cx.notify();
+            return;
+        }
         match &mut self.drag {
             Some(Drag::Pan { start, off }) => {
                 self.camera.off = (off.0 + p.0 - start.0, off.1 + p.1 - start.1);
@@ -603,6 +680,71 @@ impl TableView {
         false
     }
 
+    // ---------------------------------------------------------------- tooltips
+
+    fn jack_words(&self, uid: &str, j: usize) -> Option<String> {
+        let d = self.device(uid)?;
+        let t = self.type_of(&d.type_id)?;
+        let jack = t.jacks.get(j)?;
+        let what = match (jack.midi, jack.input) {
+            (true, true) => "MIDI input",
+            (true, false) => "MIDI output",
+            (false, true) => "audio input",
+            (false, false) => "audio output",
+        };
+        let mut s = format!("{} {} ({what})", t.name, jack.label);
+        let cabled = self.session.cables.iter().find(|c| (c.from == uid && c.from_jack == j) || (c.to == uid && c.to_jack == j));
+        if let Some(c) = cabled {
+            let (ou, oj) = if c.from == uid && c.from_jack == j { (&c.to, c.to_jack) } else { (&c.from, c.from_jack) };
+            if let Some(od) = self.device(ou) {
+                if let Some(ot) = self.type_of(&od.type_id) {
+                    s += &format!(": cabled to {} {}. Drag it to pull the cable out.", ot.name, ot.jacks.get(oj).map(|x| x.label.as_str()).unwrap_or(""));
+                }
+            }
+        } else {
+            s += ". Drag from it to another jack to cable them.";
+        }
+        Some(s)
+    }
+
+    /// What's under the mouse, in words (None for nothing worth saying).
+    fn tooltip_at(&mut self, p: (f32, f32)) -> Option<String> {
+        if p.1 < BAR_H {
+            return None; // (the bar's buttons say what they do)
+        }
+        if let Some(id) = self.shelf_card_at(p) {
+            let t = self.type_of(&id)?;
+            return Some(format!("{}: {}. Drag it onto the table.", t.name, if t.blurb.is_empty() { t.kind.as_str() } else { t.blurb.as_str() }));
+        }
+        if self.in_shelf(p) {
+            return None;
+        }
+        if let Some(uid) = self.focused.clone() {
+            if let Some(pp) = self.panel_point(&uid, p) {
+                if let Some((text, at)) = &self.panel_tip {
+                    if *at == pp {
+                        return if text.is_empty() { None } else { Some(text.clone()) };
+                    }
+                }
+                let text = self.table.device_tooltip(&uid, pp.0, pp.1);
+                self.panel_tip = Some((text.clone(), pp));
+                return if text.is_empty() { None } else { Some(text) };
+            }
+        }
+        let mm = self.to_table(p);
+        if let Some((uid, j)) = self.jack_at(mm) {
+            return self.jack_words(&uid, j);
+        }
+        if let Some(uid) = self.device_at(mm) {
+            let t = self.device(&uid).and_then(|d| self.type_of(&d.type_id))?;
+            if self.focused.as_deref() == Some(uid.as_str()) {
+                return None;
+            }
+            return Some(format!("{}. Double-click to fly in and play it; drag to move it; right-click takes it off the table.", t.name));
+        }
+        None
+    }
+
     // ---------------------------------------------------------------- the self-test
 
     fn self_test(report: String, cx: &mut Context<Self>) {
@@ -655,6 +797,53 @@ impl TableView {
                 Timer::after(Duration::from_millis(900)).await;
                 let _ = this.update(cx, |this, _| check(this.focused.is_none(), "back to the table".into(), &mut lines));
             }
+            // the drum machine: its screen's fields open their menus over the panel; its floppy drive has a tooltip
+            let pl = this.update(cx, |this, _| this.session.devices.iter().find(|d| d.type_id == "padlab").map(|d| d.uid.clone())).ok().flatten();
+            if let Some(uid) = pl {
+                let _ = this.update(cx, |this, _| this.focus_on(&uid));
+                Timer::after(Duration::from_millis(1200)).await;
+                let before = this.update(cx, |this, _| this.dropped).unwrap_or(0);
+                let _ = this.update(cx, |this, _| {
+                    // the SEQUENCE field's text (which hands its clicks on to the menu: the old forwarding missed it)
+                    this.table.device_mouse(&uid, 0, 202.0, 136.0, 0, 1);
+                    this.table.device_mouse(&uid, 2, 202.0, 136.0, 0, 1);
+                });
+                Timer::after(Duration::from_millis(500)).await;
+                let _ = this.update(cx, |this, _| {
+                    let m = this.table.menu_check(&uid);
+                    check(m == 1, format!("a screen field's menu opens over the drum machine ({m})"), &mut lines);
+                    this.table.close_menus();
+                    let tip = this.table.device_tooltip(&uid, 1012.0, 55.0);
+                    check(tip.contains("DISK"), format!("the floppy drive's tooltip: \"{tip}\""), &mut lines);
+                    check(this.dropped > before, format!("pictures redrawn are let go of ({} dropped)", this.dropped - before), &mut lines);
+                    check(this.retired.len() < 8, format!("and not kept ({} waiting)", this.retired.len()), &mut lines);
+                    this.back_to_table();
+                });
+                Timer::after(Duration::from_millis(900)).await;
+            }
+            // a cable dragged from an output lights inputs to go to; a jack says what it is
+            let _ = this.update(cx, |this, _| {
+                let c = this.session.cables[0].clone();
+                let d = this.device(&c.from).unwrap().clone();
+                let t = this.type_of(&d.type_id).unwrap().clone();
+                // (as when its plug is pulled out of the input: the output end is held)
+                let i = this.table.find_cable(&c.to, c.to_jack).unwrap();
+                this.table.disconnect(i);
+                this.reload();
+                let lit: Vec<(String, usize)> = this
+                    .session
+                    .devices
+                    .iter()
+                    .flat_map(|d2| (0..this.type_of(&d2.type_id).map(|t2| t2.jacks.len()).unwrap_or(0)).map(move |j| (d2.uid.clone(), j)))
+                    .filter(|(u2, j2)| this.table.can_connect(&c.from, c.from_jack, u2, *j2))
+                    .collect();
+                check(lit.contains(&(c.to.clone(), c.to_jack)) && lit.len() > 1, format!("dragging a cable from {} {}: {} jacks light up, the one it came from too", t.name, t.jacks[c.from_jack].label, lit.len()), &mut lines);
+                this.table.connect(&c.from, c.from_jack, &c.to, c.to_jack);
+                this.reload();
+                let at = this.to_screen(Self::jack_centre(&t, &d, c.from_jack));
+                let tip = this.tooltip_at(at).unwrap_or_default();
+                check(tip.contains(&t.jacks[c.from_jack].label) && tip.contains("cabled to"), format!("a jack's tooltip: \"{tip}\""), &mut lines);
+            });
             let _ = this.update(cx, |_, cx| {
                 let fails = lines.iter().filter(|l| l.starts_with("FAIL")).count();
                 lines.push(String::new());
@@ -740,6 +929,28 @@ impl TableView {
     }
 }
 
+struct Tip(String);
+
+impl Render for Tip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px(px(9.0))
+            .py(px(6.0))
+            .bg(rgba(0x17181cf2))
+            .border_1()
+            .border_color(rgba(0xffffff26))
+            .rounded(px(5.0))
+            .text_size(px(12.0))
+            .text_color(rgb(0xece8dd))
+            .child(self.0.clone())
+    }
+}
+
+/// A bar button that says what it does when the mouse rests on it.
+fn tip_button(id: &'static str, label: &str, tip: &'static str) -> gpui::Stateful<gpui::Div> {
+    button(label).id(id).tooltip(move |_, cx| cx.new(|_| Tip(tip.to_string())).into())
+}
+
 fn button(label: &str) -> gpui::Div {
     div()
         .px(px(14.0))
@@ -776,6 +987,31 @@ impl Render for TableView {
         if !self.fitted {
             self.fitted = true;
             self.fit_all(false);
+        }
+        // pictures replaced two frames ago are off screen now: out of the atlas with them
+        self.frame += 1;
+        let now = self.frame;
+        let (old, keep): (Vec<_>, Vec<_>) = self.retired.drain(..).partition(|(f0, _)| now >= f0 + 2);
+        self.retired = keep;
+        for (_, img) in old {
+            if window.drop_image(img).is_ok() {
+                self.dropped += 1;
+            }
+        }
+        // the bridge keeps the played panel where it is on screen (so its menus and pop-ups open over it)
+        let wb = window.bounds();
+        self.table.window_origin(f(wb.origin.x), f(wb.origin.y) + (f(wb.size.height) - self.view.1).max(0.0));
+        let playing = self.focused.clone().unwrap_or_default();
+        if playing != self.bridge_focus {
+            self.table.set_focused(&playing);
+            self.bridge_focus = playing.clone();
+            self.in_panel = false;
+        }
+        if let Some(d) = self.device(&playing).cloned() {
+            if let Some(t) = self.type_of(&d.type_id) {
+                let (sx, sy) = self.to_screen((d.x, d.y));
+                self.table.place_device(&d.uid, sx, sy, self.camera.zoom * t.width_mm / t.panel_w);
+            }
         }
         let z = self.camera.zoom;
 
@@ -846,6 +1082,10 @@ impl Render for TableView {
             let p = self.sprite(d, &mut budget);
             pictures.insert(d.uid.clone(), p);
         }
+        let dragging_from = match &self.drag {
+            Some(Drag::Cable { uid, jack, .. }) => Some((uid.clone(), *jack)),
+            _ => None,
+        };
         for d in &devices {
             let Some(t) = self.type_of(&d.type_id).cloned() else { continue };
             let (sx, sy) = self.to_screen((d.x, d.y - STRIP_MM));
@@ -869,6 +1109,13 @@ impl Render for TableView {
                 let c = Self::jack_centre(&t, d, j);
                 let r = Self::jack_radius(jack) * z;
                 let (cxp, cyp) = ((c.0 - d.x) * z, (c.1 - (d.y - STRIP_MM)) * z);
+                // a cable being dragged lights the jacks it could go into
+                if let Some((fu, fj)) = &dragging_from {
+                    if self.table.can_connect(fu, *fj, &d.uid, j) {
+                        let g = r + 2.5 * z + 2.0;
+                        node = node.child(div().absolute().left(px(cxp - g)).top(px(cyp - g)).w(px(g * 2.0)).h(px(g * 2.0)).rounded_full().bg(rgba(0x6dff8a8c)));
+                    }
+                }
                 node = node.child(
                     div().absolute().left(px(cxp - r)).top(px(cyp - r)).w(px(r * 2.0)).h(px(r * 2.0)).rounded_full().bg(rgb(0xc4c8ce)).child(
                         div().absolute().left(px(r * 0.3)).top(px(r * 0.3)).w(px(r * 1.4)).h(px(r * 1.4)).rounded_full().bg(rgb(0x0d0e10)),
@@ -993,16 +1240,43 @@ impl Render for TableView {
             }
         }
 
+        // ---- a tooltip, once the mouse has rested
+        if self.drag.is_none() && self.pointer_still.elapsed() > Duration::from_millis(550) {
+            if let Some(p) = self.pointer {
+                if let Some(text) = self.tooltip_at(p) {
+                    let w = (text.len() as f32 * 6.6 + 22.0).min(340.0);
+                    let x = (p.0 + 14.0).min(self.view.0 - w - 8.0).max(8.0);
+                    let y = if p.1 + 60.0 > self.view.1 { p.1 - 40.0 } else { p.1 + 20.0 };
+                    root = root.child(
+                        div()
+                            .absolute()
+                            .left(px(x))
+                            .top(px(y))
+                            .max_w(px(340.0))
+                            .px(px(9.0))
+                            .py(px(6.0))
+                            .bg(rgba(0x17181cf2))
+                            .border_1()
+                            .border_color(rgba(0xffffff26))
+                            .rounded(px(5.0))
+                            .text_size(px(12.0))
+                            .text_color(rgb(0xece8dd))
+                            .child(text),
+                    );
+                }
+            }
+        }
+
         // ---- the top bar
         let mut bar = div().absolute().left(px(0.0)).top(px(0.0)).w(px(self.view.0)).h(px(BAR_H)).px(px(12.0)).flex().items_center().gap(px(8.0));
         if self.focused.is_some() {
-            bar = bar.child(button("<  Back to the table").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+            bar = bar.child(tip_button("back", "<  Back to the table", "Back to the whole table (Escape)").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                 this.back_to_table();
                 cx.stop_propagation();
                 cx.notify();
             })));
         } else {
-            bar = bar.child(button("New Table").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+            bar = bar.child(tip_button("new", "New Table", "Start again with the first table: an interface, a mixer and some devices, cabled").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                 this.table.new_table();
                 this.reload();
                 this.fit_all(true);
@@ -1012,7 +1286,7 @@ impl Render for TableView {
         }
         bar = bar
             .child(div().flex_1())
-            .child(button("Fit").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+            .child(tip_button("fit", "Fit", "Show every device on the table").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                 if this.focused.is_some() {
                     this.back_to_table();
                 } else {
@@ -1021,11 +1295,11 @@ impl Render for TableView {
                 cx.stop_propagation();
                 cx.notify();
             })))
-            .child(button("Audio/MIDI").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+            .child(tip_button("audio", "Audio/MIDI", "Choose the audio device, its inputs and outputs, and MIDI inputs").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                 this.table.show_audio_settings();
                 cx.stop_propagation();
             })))
-            .child(button("Help").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+            .child(tip_button("help", "Help", "How the table works").on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                 this.table.show_help();
                 cx.stop_propagation();
             })));
